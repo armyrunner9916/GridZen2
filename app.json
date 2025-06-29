@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "GridZen 2",
+    "slug": "gridzen2",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/playstore.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.steveomatic.gridzen2",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "com.steveomatic.gridzen2",
+      "versionCode": 1,
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292"
+      },
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/playstore.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/playstore.png"
+    },
+    "plugins": [
+      "expo-av"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "097415cf-2740-4202-97bf-f982d7642265"
+      }
+    },
+    "owner": "armyrunne9916"
+  }
+}

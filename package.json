@@ -1,0 +1,30 @@
+{
+  "name": "gridzen",
+  "license": "0BSD",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-native-picker/picker": "2.11.1",
+    "expo": "~53.0.9",
+    "expo-ads-admob": "^8.4.0",
+    "expo-asset": "~11.1.5",
+    "expo-audio": "~0.4.6",
+    "expo-av": "~15.1.5",
+    "expo-constants": "~17.1.6",
+    "expo-splash-screen": "~0.30.9",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native": "0.79.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  },
+  "private": true
+}
