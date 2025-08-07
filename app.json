@@ -39,7 +39,7 @@
       "favicon": "./assets/images/playstore.png"
     },
     "plugins": [
-      "expo-av",
+      "expo-audio",
       "expo-system-ui",
       [
         "react-native-google-mobile-ads",

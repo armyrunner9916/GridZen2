@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
-import { Audio } from 'expo-av';
+import { Audio } from 'expo-audio';
 import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
 import ConfettiCannon from 'react-native-confetti-cannon';
 
@@ -61,7 +61,7 @@ const generateDistinctColors = (count) => {
 // Game component
 const GridZenGame = () => {
   const [gameState, setGameState] = useState('splash');
-  const [gridSize, setGridSize] = useState(3);
+  const [gridSize, setGridSize] = useState(4);
   const [grid, setGrid] = useState([]);
   const [targetGrid, setTargetGrid] = useState([]);
   const [selectedTile, setSelectedTile] = useState(null);
@@ -72,7 +72,7 @@ const GridZenGame = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [showHighScores, setShowHighScores] = useState(false);
-  const [selectedDifficulty, setSelectedDifficulty] = useState('3x3');
+  const [selectedDifficulty, setSelectedDifficulty] = useState('4x4');
   const [isInitialized, setIsInitialized] = useState(false);
   const [animatingTiles, setAnimatingTiles] = useState(new Set());
 
@@ -90,8 +90,6 @@ const GridZenGame = () => {
   // Difficulty-based gradient backgrounds
   const getDifficultyGradient = useCallback((size) => {
     switch (size) {
-      case 3:
-        return ['#4CAF50', '#000000']; // Green to black (Easy)
       case 4:
         return ['#4CAF50', '#000000']; // Green to black (Easy)
       case 5:
@@ -249,8 +247,8 @@ const GridZenGame = () => {
 
   // Time limits based on grid size - memoized
   const getTimeLimit = useCallback((size) => {
-    const timeLimits = { 3: 30, 4: 60, 5: 90, 6: 120 };
-    return timeLimits[size] || 30;
+    const timeLimits = { 4: 60, 5: 90, 6: 120 };
+    return timeLimits[size] || 60;
   }, []);
 
   // Initialize tile animations
@@ -806,7 +804,6 @@ const GridZenGame = () => {
                   onValueChange={setSelectedDifficulty}
                   style={{ color: theme.inputText }}
                 >
-                  <Picker.Item label="3x3" value="3x3" />
                   <Picker.Item label="4x4" value="4x4" />
                   <Picker.Item label="5x5" value="5x5" />
                   <Picker.Item label="6x6" value="6x6" />
