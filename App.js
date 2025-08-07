@@ -162,36 +162,19 @@ const GridZenGame = () => {
     }
   }, []);
 
-  // Enhanced sound loading with better error handling
+  // Enhanced sound loading with expo-audio API
   const loadSounds = useCallback(async () => {
     if (isUnmountedRef.current) return;
 
     try {
-      // Only attempt audio setup on native platforms
-      if (Platform.OS !== 'web') {
-        try {
-          await Audio.setAudioModeAsync({
-            playsInSilentModeIOS: true,
-            shouldDuckAndroid: true,
-            staysActiveInBackground: false,
-            allowsRecordingIOS: false,
-          });
-        } catch (audioError) {
-          console.log('Audio mode setup failed (non-critical):', audioError);
-          // Continue without audio mode setup
-        }
-      }
-
-      // Load sounds with better error handling
+      // Load sounds with expo-audio API
       try {
         const gameOverSoundObject = await Audio.Sound.createAsync(
-          require('./assets/sounds/Game_over.mp3'),
-          { shouldPlay: false, isLooping: false }
+          require('./assets/sounds/Game_over.mp3')
         );
         
         const victorySoundObject = await Audio.Sound.createAsync(
-          require('./assets/sounds/Cheer.mp3'),
-          { shouldPlay: false, isLooping: false }
+          require('./assets/sounds/Cheer.mp3')
         );
 
         if (!isUnmountedRef.current) {
@@ -212,7 +195,7 @@ const GridZenGame = () => {
     }
   }, []);
 
-  // Safe sound playing with error handling
+  // Safe sound playing with expo-audio API
   const playSound = useCallback(async (soundType) => {
     if (!soundEnabled || isUnmountedRef.current) return;
 
@@ -225,7 +208,9 @@ const GridZenGame = () => {
       }
 
       if (soundRef) {
-        await soundRef.replayAsync();
+        // expo-audio uses playAsync instead of replayAsync
+        await soundRef.setPositionAsync(0); // Reset to beginning
+        await soundRef.playAsync();
       }
     } catch (error) {
       console.log('Sound playback error (non-critical):', error);
