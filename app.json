@@ -20,12 +20,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317"
     },
     "android": {
       "package": "com.steveomatic.gridzen2",
       "versionCode": 1,
       "edgeToEdgeEnabled": true,
+      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/playstore.png",
         "backgroundColor": "#ffffff"
@@ -44,6 +46,8 @@
       [
         "react-native-google-mobile-ads",
         {
+          "androidAppId": "ca-app-pub-7368779159802085~6120308292",
+          "iosAppId": "ca-app-pub-7368779159802085~2981633317",
           "android_app_id": "ca-app-pub-7368779159802085~6120308292",
           "ios_app_id": "ca-app-pub-7368779159802085~2981633317"
         }
