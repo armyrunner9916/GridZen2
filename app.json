@@ -25,9 +25,7 @@
     "android": {
       "package": "com.steveomatic.gridzen2",
       "versionCode": 1,
-      "config": {
-        "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292"
-      },
+      "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/playstore.png",
         "backgroundColor": "#ffffff"
@@ -41,7 +39,15 @@
       "favicon": "./assets/images/playstore.png"
     },
     "plugins": [
-      "expo-av"
+      "expo-av",
+      "expo-system-ui",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-7368779159802085~6120308292",
+          "iosAppId": "ca-app-pub-7368779159802085~2981633317"
+        }
+      ]
     ],
     "extra": {
       "eas": {

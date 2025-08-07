@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,12 +12,14 @@ import {
   Switch,
   Platform,
   Animated,
-  UIManager
+  UIManager,
+  Image
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { Audio } from 'expo-av';
-import { AdMobBanner } from 'expo-ads-admob';
+import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+import ConfettiCannon from 'react-native-confetti-cannon';
 
 // Enable LayoutAnimation on Android to avoid crashes related to animated layout changes
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -72,15 +74,34 @@ const GridZenGame = () => {
   const [showHighScores, setShowHighScores] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState('3x3');
   const [isInitialized, setIsInitialized] = useState(false);
+  const [animatingTiles, setAnimatingTiles] = useState(new Set());
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const tileAnimations = useRef({}).current;
 
   // Refs
   const timerRef = useRef(null);
   const gameOverSound = useRef(null);
   const victorySound = useRef(null);
   const isUnmountedRef = useRef(false);
+  const confettiRef = useRef(null);
+
+  // Difficulty-based gradient backgrounds
+  const getDifficultyGradient = useCallback((size) => {
+    switch (size) {
+      case 3:
+        return ['#4CAF50', '#000000']; // Green to black (Easy)
+      case 4:
+        return ['#4CAF50', '#000000']; // Green to black (Easy)
+      case 5:
+        return ['#FFC107', '#000000']; // Yellow to black (Medium)
+      case 6:
+        return ['#F44336', '#000000']; // Red to black (Hard)
+      default:
+        return ['#4CAF50', '#000000'];
+    }
+  }, []);
 
   // Safe async storage operations
   const safeAsyncStorage = {
@@ -214,7 +235,7 @@ const GridZenGame = () => {
   }, [soundEnabled]);
 
   // Theme colors - memoized for performance
-  const theme = React.useMemo(() => ({
+  const theme = useMemo(() => ({
     background: isDarkMode ? '#1a1a1a' : '#ffffff',
     text: isDarkMode ? '#ffffff' : '#000000',
     tile: isDarkMode ? '#2a2a2a' : '#f0f0f0',
@@ -231,6 +252,73 @@ const GridZenGame = () => {
     const timeLimits = { 3: 30, 4: 60, 5: 90, 6: 120 };
     return timeLimits[size] || 30;
   }, []);
+
+  // Initialize tile animations
+  const initializeTileAnimation = useCallback((row, col) => {
+    const key = `${row}-${col}`;
+    if (!tileAnimations[key]) {
+      tileAnimations[key] = {
+        translateX: new Animated.Value(0),
+        translateY: new Animated.Value(0),
+      };
+    }
+    return tileAnimations[key];
+  }, [tileAnimations]);
+
+  // Animate tile swap
+  const animateTileSwap = useCallback((fromPos, toPos) => {
+    const fromKey = `${fromPos.row}-${fromPos.col}`;
+    const toKey = `${toPos.row}-${toPos.col}`;
+    
+    const fromAnim = initializeTileAnimation(fromPos.row, fromPos.col);
+    const toAnim = initializeTileAnimation(toPos.row, toPos.col);
+    
+    const tileSize = Math.max(40, (screenWidth - 60) / gridSize - 10);
+    const spacing = tileSize + 10;
+    
+    const deltaX = (toPos.col - fromPos.col) * spacing;
+    const deltaY = (toPos.row - fromPos.row) * spacing;
+    
+    setAnimatingTiles(prev => new Set([...prev, fromKey, toKey]));
+    
+    const animations = [
+      Animated.timing(fromAnim.translateX, {
+        toValue: deltaX,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fromAnim.translateY, {
+        toValue: deltaY,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(toAnim.translateX, {
+        toValue: -deltaX,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(toAnim.translateY, {
+        toValue: -deltaY,
+        duration: 250,
+        useNativeDriver: true,
+      })
+    ];
+    
+    Animated.parallel(animations).start(() => {
+      // Reset animations
+      fromAnim.translateX.setValue(0);
+      fromAnim.translateY.setValue(0);
+      toAnim.translateX.setValue(0);
+      toAnim.translateY.setValue(0);
+      
+      setAnimatingTiles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(fromKey);
+        newSet.delete(toKey);
+        return newSet;
+      });
+    });
+  }, [initializeTileAnimation, gridSize]);
 
   // Enhanced initial data loading
   const loadInitialData = useCallback(async () => {
@@ -507,7 +595,7 @@ const GridZenGame = () => {
     }
   }, [gridSize]);
 
-  // Enhanced win handling
+  // Enhanced win handling with confetti
   const handleWin = useCallback(() => {
     if (isUnmountedRef.current) return;
 
@@ -516,6 +604,11 @@ const GridZenGame = () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
+      }
+      
+      // Fire confetti
+      if (confettiRef.current) {
+        confettiRef.current.start();
       }
       
       const scoreKey = `${gridSize}x${gridSize}`;
@@ -551,7 +644,7 @@ const GridZenGame = () => {
     }
   }, [gridSize, playerName, moves, timeLeft, highScores, saveHighScores, playSound]);
 
-  // Enhanced tile press handling
+  // Enhanced tile press handling with smooth animation
   const handleTilePress = useCallback((row, col) => {
     if (gameState !== 'playing' || isUnmountedRef.current) return;
 
@@ -571,6 +664,9 @@ const GridZenGame = () => {
           (Math.abs(col - selCol) === 1 && row === selRow);
 
         if (isAdjacent) {
+          // Animate the swap
+          animateTileSwap({ row: selRow, col: selCol }, { row, col });
+          
           const newGrid = grid.map(gridRow => [...gridRow]);
           const temp = newGrid[row][col];
           newGrid[row][col] = newGrid[selRow][selCol];
@@ -581,7 +677,7 @@ const GridZenGame = () => {
           setSelectedTile(null);
           
           if (checkWin(newGrid)) {
-            handleWin();
+            setTimeout(() => handleWin(), 300); // Delay to let animation finish
           }
         } else {
           setSelectedTile({ row, col });
@@ -591,7 +687,7 @@ const GridZenGame = () => {
       console.log('Tile press error:', error);
       setSelectedTile(null);
     }
-  }, [gameState, selectedTile, grid, checkWin, handleWin]);
+  }, [gameState, selectedTile, grid, checkWin, handleWin, animateTileSwap]);
 
   // Enhanced reset high scores
   const resetHighScores = useCallback(() => {
@@ -618,34 +714,55 @@ const GridZenGame = () => {
     );
   }, []);
 
-  // Enhanced tile rendering with error boundary
+  // Enhanced tile rendering with animation support
   const renderTile = useCallback((tile, row, col) => {
     try {
       if (!tile) return null;
 
       const isSelected = selectedTile && selectedTile.row === row && selectedTile.col === col;
       const tileSize = Math.max(40, (screenWidth - 60) / gridSize - 10);
+      const key = `${row}-${col}`;
+      const isAnimating = animatingTiles.has(key);
+      const animation = initializeTileAnimation(row, col);
       
       return (
-        <TouchableOpacity
-          key={`${row}-${col}`}
-          style={[
-            styles.tile,
-            {
-              backgroundColor: tile.color || '#cccccc',
-              width: tileSize,
-              height: tileSize,
-              borderColor: isSelected ? theme.selectedTile : theme.border,
-              borderWidth: isSelected ? 3 : 1,
-            },
-          ]}
-          onPress={() => handleTilePress(row, col)}
-          activeOpacity={0.7}
+        <Animated.View
+          key={key}
+          style={{
+            transform: [
+              { translateX: animation.translateX },
+              { translateY: animation.translateY }
+            ]
+          }}
         >
-          <Text style={[styles.tileText, { color: theme.text, fontSize: Math.min(24, tileSize / 3) }]}>
-            {tile.number || '?'}
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tile,
+              {
+                backgroundColor: tile.color || '#cccccc',
+                width: tileSize,
+                height: tileSize,
+                borderColor: isSelected ? theme.selectedTile : theme.border,
+                borderWidth: isSelected ? 3 : 1,
+                shadowColor: '#000',
+                shadowOffset: {
+                  width: 0,
+                  height: 4,
+                },
+                shadowOpacity: 0.3,
+                shadowRadius: 4.65,
+                elevation: 8,
+              },
+            ]}
+            onPress={() => handleTilePress(row, col)}
+            activeOpacity={0.7}
+            disabled={isAnimating}
+          >
+            <Text style={[styles.tileText, { color: theme.text, fontSize: Math.min(24, tileSize / 3) }]}>
+              {tile.number || '?'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
       );
     } catch (error) {
       console.log('Tile render error:', error);
@@ -658,7 +775,7 @@ const GridZenGame = () => {
         </View>
       );
     }
-  }, [selectedTile, gridSize, theme, handleTilePress]);
+  }, [selectedTile, gridSize, theme, handleTilePress, animatingTiles, initializeTileAnimation]);
 
   // Enhanced high scores modal rendering
   const renderHighScoresModal = useCallback(() => {
@@ -732,129 +849,152 @@ const GridZenGame = () => {
     );
   }, [showHighScores, selectedDifficulty, highScores, theme, resetHighScores]);
 
-  // Enhanced menu rendering
+  // Enhanced menu rendering with gradient background
   const renderMenu = useCallback(() => {
-  return (
-    <SafeComponent fallback={<View style={styles.container}><Text>Loading...</Text></View>}>
-      <View style={[styles.container, { backgroundColor: theme.background, flex: 1 }]}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
-          <Text style={[styles.title, { color: theme.text }]}>GridZen</Text>
+    const gradientColors = getDifficultyGradient(gridSize);
+    
+    return (
+      <SafeComponent fallback={<View style={styles.container}><Text>Loading...</Text></View>}>
+        <View style={[styles.container, { backgroundColor: theme.background, flex: 1 }]}>
+          <View style={[styles.gradientBackground, {
+            background: `linear-gradient(135deg, ${gradientColors[0]}, ${gradientColors[1]})`
+          }]} />
+          <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
+            <Text style={[styles.title, { color: theme.text }]}>GridZen</Text>
 
-          <View style={styles.controls}>
-            <View style={styles.controlRow}>
-              <Text style={[styles.controlLabel, { color: theme.text }]}>Dark Mode</Text>
-              <Switch
-                value={isDarkMode}
-                onValueChange={(value) => {
-                  setIsDarkMode(value);
-                  saveSettings();
-                }}
-                trackColor={{ false: '#767577', true: '#81b0ff' }}
-                thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
-              />
+            <View style={styles.controls}>
+              <View style={styles.controlRow}>
+                <Text style={[styles.controlLabel, { color: theme.text }]}>Dark Mode</Text>
+                <Switch
+                  value={isDarkMode}
+                  onValueChange={(value) => {
+                    setIsDarkMode(value);
+                    saveSettings();
+                  }}
+                  trackColor={{ false: '#767577', true: '#81b0ff' }}
+                  thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.controlButton, { backgroundColor: theme.button }]}
+                onPress={() => setShowHighScores(true)}
+              >
+                <Text style={[styles.buttonText, { color: theme.buttonText }]}>View High Scores</Text>
+              </TouchableOpacity>
+
+              <View style={styles.controlRow}>
+                <Text style={[styles.controlLabel, { color: theme.text }]}>
+                  Sounds {soundEnabled ? '🔔' : '🔕'}
+                </Text>
+                <Switch
+                  value={soundEnabled}
+                  onValueChange={(value) => {
+                    setSoundEnabled(value);
+                    saveSettings();
+                  }}
+                  trackColor={{ false: '#767577', true: '#81b0ff' }}
+                  thumbColor={soundEnabled ? '#f5dd4b' : '#f4f3f4'}
+                />
+              </View>
             </View>
 
-            <TouchableOpacity
-              style={[styles.controlButton, { backgroundColor: theme.button }]}
-              onPress={() => setShowHighScores(true)}
-            >
-              <Text style={[styles.buttonText, { color: theme.buttonText }]}>View High Scores</Text>
-            </TouchableOpacity>
-
-            <View style={styles.controlRow}>
-              <Text style={[styles.controlLabel, { color: theme.text }]}>
-                Sounds {soundEnabled ? '🔔' : '🔕'}
+            <View style={styles.menuContent}>
+              <Text style={[styles.instructions, { color: theme.text }]}>
+                Rearrange the tiles to place numbers in order from 1 to {gridSize * gridSize},
+                reading left to right, top to bottom.
               </Text>
-              <Switch
-                value={soundEnabled}
-                onValueChange={(value) => {
-                  setSoundEnabled(value);
-                  saveSettings();
-                }}
-                trackColor={{ false: '#767577', true: '#81b0ff' }}
-                thumbColor={soundEnabled ? '#f5dd4b' : '#f4f3f4'}
+
+              <Text style={[styles.instructions, { color: theme.text }]}>
+                You can only swap adjacent tiles (up-down, left-right).
+              </Text>
+
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.input, color: theme.inputText }]}
+                placeholder="Enter your name"
+                placeholderTextColor={isDarkMode ? '#999' : '#666'}
+                value={playerName}
+                onChangeText={setPlayerName}
+                maxLength={20}
               />
-            </View>
-          </View>
 
-          <View style={styles.menuContent}>
-            <Text style={[styles.instructions, { color: theme.text }]}>
-              Rearrange the tiles to place numbers in order from 1 to {gridSize * gridSize},
-              reading left to right, top to bottom.
-            </Text>
+              <Text style={[styles.label, { color: theme.text }]}>Select Grid Size:</Text>
 
-            <Text style={[styles.instructions, { color: theme.text }]}>
-              You can only swap adjacent tiles (up-down, left-right).
-            </Text>
-
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.input, color: theme.inputText }]}
-              placeholder="Enter your name"
-              placeholderTextColor={isDarkMode ? '#999' : '#666'}
-              value={playerName}
-              onChangeText={setPlayerName}
-              maxLength={20}
-            />
-
-            <Text style={[styles.label, { color: theme.text }]}>Select Grid Size:</Text>
-
-            <View style={styles.sizeButtons}>
-              {[3, 4, 5, 6].map((size) => (
-                <TouchableOpacity
-                  key={size}
-                  style={[
-                    styles.sizeButton,
-                    {
-                      backgroundColor: gridSize === size ? theme.selectedTile : theme.button,
-                    },
-                  ]}
-                  onPress={() => setGridSize(size)}
-                >
-                  <Text
+              <View style={styles.sizeButtons}>
+                {[3, 4, 5, 6].map((size) => (
+                  <TouchableOpacity
+                    key={size}
                     style={[
-                      styles.sizeButtonText,
+                      styles.sizeButton,
                       {
-                        color: gridSize === size ? '#ffffff' : theme.buttonText,
+                        backgroundColor: gridSize === size ? theme.selectedTile : theme.button,
                       },
                     ]}
+                    onPress={() => setGridSize(size)}
                   >
-                    {size}x{size}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.sizeButtonText,
+                        {
+                          color: gridSize === size ? '#ffffff' : theme.buttonText,
+                        },
+                      ]}
+                    >
+                      {size}x{size}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[styles.timeLimit, { color: theme.text }]}>
+                Time Limit: {getTimeLimit(gridSize)} seconds
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.startButton, { backgroundColor: theme.selectedTile }]}
+                onPress={startGame}
+              >
+                <Text style={[styles.startButtonText, { color: '#ffffff' }]}>Start Game</Text>
+              </TouchableOpacity>
             </View>
 
-            <Text style={[styles.timeLimit, { color: theme.text }]}>
-              Time Limit: {getTimeLimit(gridSize)} seconds
-            </Text>
+            {renderHighScoresModal()}
+          </ScrollView>
 
-            <TouchableOpacity
-              style={[styles.startButton, { backgroundColor: theme.selectedTile }]}
-              onPress={startGame}
-            >
-              <Text style={[styles.startButtonText, { color: '#ffffff' }]}>Start Game</Text>
-            </TouchableOpacity>
-          </View>
+          <BannerAd
+            unitId={__DEV__ ? TestIds.BANNER : "ca-app-pub-7368779159802085/6628408902"}
+            size={BannerAdSize.FULL_BANNER}
+            requestOptions={{
+              requestNonPersonalizedAdsOnly: true,
+            }}
+            onAdFailedToLoad={(error) => console.log("Ad failed to load:", error)}
+          />
+        </View>
+      </SafeComponent>
+    );
+  }, [theme, isDarkMode, soundEnabled, saveSettings, gridSize, playerName, getTimeLimit, startGame, renderHighScoresModal, getDifficultyGradient]);
 
-          {renderHighScoresModal()}
-        </ScrollView>
-
-        <AdMobBanner
-          bannerSize="smartBannerPortrait"
-          adUnitID="ca-app-pub-7368779159802085/6628408902"
-          servePersonalizedAds
-          onDidFailToReceiveAdWithError={(error) => console.error("Ad error:", error)}
-        />
-      </View>
-    </SafeComponent>
-  );
-}, [theme, isDarkMode, soundEnabled, saveSettings, gridSize, playerName, getTimeLimit, startGame, renderHighScoresModal]);
-
-  // Enhanced game rendering
+  // Enhanced game rendering with banner and gradient
   const renderGame = useCallback(() => {
+    const gradientColors = getDifficultyGradient(gridSize);
+    
     return (
       <SafeComponent fallback={<View style={styles.container}><Text>Game Error</Text></View>}>
         <View style={[styles.container, { backgroundColor: theme.background }]}>
+          <View style={[styles.gradientBackground, {
+            background: `linear-gradient(135deg, ${gradientColors[0]}, ${gradientColors[1]})`
+          }]} />
+          
+          {/* GridZen2 Banner */}
+          <View style={styles.bannerContainer}>
+            <Image
+              source={require('./assets/images/gridzen2.png')}
+              style={styles.bannerImage}
+              resizeMode="contain"
+              onError={() => console.log('Banner image failed to load')}
+            />
+          </View>
+
           <View style={styles.header}>
             <Text style={[styles.headerText, { color: theme.text }]}>Moves: {moves}</Text>
             <Text style={[styles.headerText, { color: theme.text }]}>Time: {timeLeft}s</Text>
@@ -881,10 +1021,19 @@ const GridZenGame = () => {
           >
             <Text style={[styles.buttonText, { color: theme.buttonText }]}>Give Up</Text>
           </TouchableOpacity>
+
+          {/* Confetti Cannon */}
+          <ConfettiCannon
+            ref={confettiRef}
+            count={200}
+            origin={{ x: screenWidth / 2, y: 0 }}
+            autoStart={false}
+            fadeOut={true}
+          />
         </View>
       </SafeComponent>
     );
-  }, [theme, moves, timeLeft, grid, renderTile, playSound]);
+  }, [theme, moves, timeLeft, grid, renderTile, playSound, gridSize, getDifficultyGradient]);
 
   // Enhanced splash screen rendering
   const renderSplash = useCallback(() => {
@@ -929,12 +1078,22 @@ const GridZenGame = () => {
   return gameState === 'menu' ? renderMenu() : renderGame();
 };
 
-// Enhanced styles with better responsive design
+// Enhanced styles with modern design and gradient support
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
     justifyContent: 'center',
+    position: 'relative',
+  },
+  gradientBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0.1,
+    zIndex: 0,
   },
   loadingContainer: {
     flex: 1,
@@ -961,14 +1120,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  bannerContainer: {
+    alignItems: 'center',
+    marginBottom: 15,
+    paddingHorizontal: 20,
+  },
+  bannerImage: {
+    height: 60,
+    width: screenWidth - 40,
+    maxWidth: 300,
+  },
   title: {
     fontSize: Math.min(36, screenWidth * 0.1),
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 20,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   controls: {
     marginBottom: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   controlRow: {
     flexDirection: 'row',
@@ -983,11 +1166,30 @@ const styles = StyleSheet.create({
   },
   controlButton: {
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   menuContent: {
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   instructions: {
     fontSize: 16,
@@ -998,13 +1200,21 @@ const styles = StyleSheet.create({
   },
   input: {
     width: '100%',
-    padding: 12,
-    borderRadius: 8,
+    padding: 15,
+    borderRadius: 12,
     fontSize: 16,
     marginTop: 20,
     marginBottom: 20,
     borderWidth: 1,
     borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   label: {
     fontSize: 18,
@@ -1020,8 +1230,16 @@ const styles = StyleSheet.create({
   sizeButton: {
     padding: 15,
     margin: 5,
-    borderRadius: 8,
+    borderRadius: 12,
     minWidth: Math.min(60, screenWidth * 0.15),
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   sizeButtonText: {
     fontSize: 16,
@@ -1034,9 +1252,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   startButton: {
-    padding: 15,
-    borderRadius: 8,
+    padding: 18,
+    borderRadius: 15,
     minWidth: Math.min(200, screenWidth * 0.5),
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   startButtonText: {
     fontSize: 18,
@@ -1048,15 +1274,39 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 20,
     paddingHorizontal: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 15,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   headerText: {
     fontSize: 20,
     fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   gridContainer: {
     alignItems: 'center',
     marginBottom: 30,
-    paddingVertical: 10,
+    paddingVertical: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   row: {
     flexDirection: 'row',
@@ -1066,24 +1316,35 @@ const styles = StyleSheet.create({
     margin: 5,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
-    elevation: 3,
+    borderRadius: 12,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
     minWidth: 40,
     minHeight: 40,
   },
   tileText: {
     fontWeight: 'bold',
     textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   button: {
     padding: 15,
-    borderRadius: 8,
+    borderRadius: 12,
     alignSelf: 'center',
     minWidth: 150,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   buttonText: {
     fontSize: 16,
@@ -1101,12 +1362,12 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     maxHeight: '90%',
     padding: 20,
-    borderRadius: 12,
-    elevation: 5,
+    borderRadius: 20,
+    elevation: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
   },
   modalTitle: {
     fontSize: 24,
@@ -1116,8 +1377,16 @@ const styles = StyleSheet.create({
   },
   resetButton: {
     padding: 10,
-    borderRadius: 6,
+    borderRadius: 8,
     marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   resetButtonText: {
     fontSize: 14,
@@ -1125,9 +1394,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pickerContainer: {
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 20,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   scoresContainer: {
     maxHeight: 300,
