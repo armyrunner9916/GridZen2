@@ -42,16 +42,7 @@
     },
     "plugins": [
       "expo-audio",
-      "expo-system-ui",
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-7368779159802085~6120308292",
-          "iosAppId": "ca-app-pub-7368779159802085~2981633317",
-          "android_app_id": "ca-app-pub-7368779159802085~6120308292",
-          "ios_app_id": "ca-app-pub-7368779159802085~2981633317"
-        }
-      ]
+      "expo-system-ui"
     ],
     "extra": {
       "eas": {

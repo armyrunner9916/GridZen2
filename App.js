@@ -18,7 +18,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { Audio } from 'expo-audio';
-import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+// import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
 import ConfettiCannon from 'react-native-confetti-cannon';
 
 // Enable LayoutAnimation on Android to avoid crashes related to animated layout changes
@@ -903,7 +903,7 @@ const GridZenGame = () => {
               <Text style={[styles.label, { color: theme.text }]}>Select Grid Size:</Text>
 
               <View style={styles.sizeButtons}>
-                {[3, 4, 5, 6].map((size) => (
+                {[4, 5, 6].map((size) => (
                   <TouchableOpacity
                     key={size}
                     style={[
@@ -943,6 +943,8 @@ const GridZenGame = () => {
             {renderHighScoresModal()}
           </ScrollView>
 
+          {/* Ads temporarily disabled for testing */}
+          {/* 
           <BannerAd
             unitId={__DEV__ ? TestIds.BANNER : "ca-app-pub-7368779159802085/6628408902"}
             size={BannerAdSize.FULL_BANNER}
@@ -951,6 +953,7 @@ const GridZenGame = () => {
             }}
             onAdFailedToLoad={(error) => console.log("Ad failed to load:", error)}
           />
+          */}
         </View>
       </SafeComponent>
     );
