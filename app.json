@@ -21,7 +21,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
       "buildNumber": "1",
-      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317"
+      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.steveomatic.gridzen2",

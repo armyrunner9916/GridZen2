@@ -14,7 +14,7 @@ import {
   Animated,
   UIManager,
   Image,
-  LinearGradient
+  SafeAreaView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
@@ -165,12 +165,12 @@ const GridZenGame = () => {
 
   // Enhanced sound loading with expo-audio API (properly handled)
   const loadSounds = useCallback(async () => {
-    if (isUnmountedRef.current) return;
+    if (isUnmountedRef.current || !soundEnabled) return;
 
     try {
-      // expo-audio might not be available or properly loaded
-      if (!Audio || !Audio.Sound) {
-        console.log('Audio not available, continuing without sounds');
+      // Check if Audio is available
+      if (typeof Audio === 'undefined' || !Audio.Sound) {
+        console.log('Audio module not available, continuing without sounds');
         return;
       }
 
@@ -189,18 +189,18 @@ const GridZenGame = () => {
           victorySound.current = victorySoundObject.sound;
         }
       } catch (loadError) {
-        console.log('Sound loading failed (non-critical):', loadError);
+        console.log('Sound files not found or loading failed (non-critical):', loadError.message);
         // Continue without sounds
         gameOverSound.current = null;
         victorySound.current = null;
       }
     } catch (error) {
-      console.log('Sound initialization failed (non-critical):', error);
+      console.log('Sound initialization error (non-critical):', error.message);
       // Ensure sound refs are null on failure
       gameOverSound.current = null;
       victorySound.current = null;
     }
-  }, []);
+  }, [soundEnabled]);
 
   // Safe sound playing with expo-audio API
   const playSound = useCallback(async (soundType) => {
@@ -275,38 +275,40 @@ const GridZenGame = () => {
       Animated.timing(fromAnim.translateX, {
         toValue: deltaX,
         duration: 250,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS === 'ios', // Only use native driver on iOS
       }),
       Animated.timing(fromAnim.translateY, {
         toValue: deltaY,
         duration: 250,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS === 'ios',
       }),
       Animated.timing(toAnim.translateX, {
         toValue: -deltaX,
         duration: 250,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS === 'ios',
       }),
       Animated.timing(toAnim.translateY, {
         toValue: -deltaY,
         duration: 250,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS === 'ios',
       })
     ];
     
     Animated.parallel(animations).start(() => {
-      // Reset animations
-      fromAnim.translateX.setValue(0);
-      fromAnim.translateY.setValue(0);
-      toAnim.translateX.setValue(0);
-      toAnim.translateY.setValue(0);
-      
-      setAnimatingTiles(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(fromKey);
-        newSet.delete(toKey);
-        return newSet;
-      });
+      // Reset animations with small delay for Android
+      setTimeout(() => {
+        fromAnim.translateX.setValue(0);
+        fromAnim.translateY.setValue(0);
+        toAnim.translateX.setValue(0);
+        toAnim.translateY.setValue(0);
+        
+        setAnimatingTiles(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(fromKey);
+          newSet.delete(toKey);
+          return newSet;
+        });
+      }, Platform.OS === 'android' ? 50 : 0);
     });
   }, [initializeTileAnimation, gridSize]);
 
@@ -416,7 +418,7 @@ const GridZenGame = () => {
     return () => {
       isCancelled = true;
     };
-  }, [loadInitialData, loadSounds, fadeAnim]);
+  }, []); // Remove dependencies to avoid re-initialization
 
   // Enhanced game over handling
   const handleGameOver = useCallback(() => {
@@ -559,6 +561,8 @@ const GridZenGame = () => {
       setMoves(0);
       setTimeLeft(getTimeLimit(gridSize));
       setSelectedTile(null);
+      // Force grid size update before initializing
+      setGridSize(gridSize);
       initializeGrid();
     } catch (error) {
       console.log('Start game error:', error);
@@ -715,6 +719,12 @@ const GridZenGame = () => {
       const isAnimating = animatingTiles.has(key);
       const animation = initializeTileAnimation(row, col);
       
+      // Force re-render on Android if animation values are stuck
+      if (Platform.OS === 'android' && !isAnimating) {
+        animation.translateX.setValue(0);
+        animation.translateY.setValue(0);
+      }
+      
       return (
         <Animated.View
           key={key}
@@ -722,7 +732,8 @@ const GridZenGame = () => {
             transform: [
               { translateX: animation.translateX },
               { translateY: animation.translateY }
-            ]
+            ],
+            opacity: 1, // Ensure tile is always visible
           }}
         >
           <TouchableOpacity
@@ -843,125 +854,117 @@ const GridZenGame = () => {
     const gradientColors = getDifficultyGradient(gridSize);
     
     return (
-      <SafeComponent fallback={<View style={styles.container}><Text>Loading...</Text></View>}>
-        <View style={[styles.container, { backgroundColor: theme.background, flex: 1 }]}>
-          <View style={[styles.gradientBackground, {
-            backgroundColor: gradientColors[0],
-            opacity: 0.1
-          }]} />
-          <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
-            <Text style={[styles.title, { color: theme.text }]}>GridZen</Text>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <SafeComponent fallback={<View style={styles.container}><Text>Loading...</Text></View>}>
+          <View style={[styles.container, { backgroundColor: theme.background, flex: 1 }]}>
+            <View style={[styles.gradientBackground, {
+              backgroundColor: gradientColors[0],
+              opacity: 0.1
+            }]} />
+            <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+              <Text style={[styles.title, { color: theme.text }]}>GRIDZEN 2</Text>
 
-            <View style={styles.controls}>
-              <View style={styles.controlRow}>
-                <Text style={[styles.controlLabel, { color: theme.text }]}>Dark Mode</Text>
-                <Switch
-                  value={isDarkMode}
-                  onValueChange={(value) => {
-                    setIsDarkMode(value);
-                    saveSettings();
-                  }}
-                  trackColor={{ false: '#767577', true: '#81b0ff' }}
-                  thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
-                />
+              <View style={styles.controls}>
+                <View style={styles.controlRow}>
+                  <Text style={[styles.controlLabel, { color: theme.text }]}>Dark Mode</Text>
+                  <Switch
+                    value={isDarkMode}
+                    onValueChange={(value) => {
+                      setIsDarkMode(value);
+                      saveSettings();
+                    }}
+                    trackColor={{ false: '#767577', true: '#81b0ff' }}
+                    thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.controlButton, { backgroundColor: theme.button }]}
+                  onPress={() => setShowHighScores(true)}
+                >
+                  <Text style={[styles.buttonText, { color: theme.buttonText }]}>View High Scores</Text>
+                </TouchableOpacity>
+
+                <View style={styles.controlRow}>
+                  <Text style={[styles.controlLabel, { color: theme.text }]}>
+                    Sounds {soundEnabled ? '🔔' : '🔕'}
+                  </Text>
+                  <Switch
+                    value={soundEnabled}
+                    onValueChange={(value) => {
+                      setSoundEnabled(value);
+                      saveSettings();
+                    }}
+                    trackColor={{ false: '#767577', true: '#81b0ff' }}
+                    thumbColor={soundEnabled ? '#f5dd4b' : '#f4f3f4'}
+                  />
+                </View>
               </View>
 
-              <TouchableOpacity
-                style={[styles.controlButton, { backgroundColor: theme.button }]}
-                onPress={() => setShowHighScores(true)}
-              >
-                <Text style={[styles.buttonText, { color: theme.buttonText }]}>View High Scores</Text>
-              </TouchableOpacity>
-
-              <View style={styles.controlRow}>
-                <Text style={[styles.controlLabel, { color: theme.text }]}>
-                  Sounds {soundEnabled ? '🔔' : '🔕'}
+              <View style={styles.menuContent}>
+                <Text style={[styles.instructions, { color: theme.text }]}>
+                  Rearrange the tiles to place numbers in order from 1 to {gridSize * gridSize},
+                  reading left to right, top to bottom.
                 </Text>
-                <Switch
-                  value={soundEnabled}
-                  onValueChange={(value) => {
-                    setSoundEnabled(value);
-                    saveSettings();
-                  }}
-                  trackColor={{ false: '#767577', true: '#81b0ff' }}
-                  thumbColor={soundEnabled ? '#f5dd4b' : '#f4f3f4'}
+
+                <Text style={[styles.instructions, { color: theme.text }]}>
+                  You can only swap adjacent tiles (up-down, left-right).
+                </Text>
+
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.input, color: theme.inputText }]}
+                  placeholder="Enter your name"
+                  placeholderTextColor={isDarkMode ? '#999' : '#666'}
+                  value={playerName}
+                  onChangeText={setPlayerName}
+                  maxLength={20}
                 />
-              </View>
-            </View>
 
-            <View style={styles.menuContent}>
-              <Text style={[styles.instructions, { color: theme.text }]}>
-                Rearrange the tiles to place numbers in order from 1 to {gridSize * gridSize},
-                reading left to right, top to bottom.
-              </Text>
+                <Text style={[styles.label, { color: theme.text }]}>Select Grid Size:</Text>
 
-              <Text style={[styles.instructions, { color: theme.text }]}>
-                You can only swap adjacent tiles (up-down, left-right).
-              </Text>
-
-              <TextInput
-                style={[styles.input, { backgroundColor: theme.input, color: theme.inputText }]}
-                placeholder="Enter your name"
-                placeholderTextColor={isDarkMode ? '#999' : '#666'}
-                value={playerName}
-                onChangeText={setPlayerName}
-                maxLength={20}
-              />
-
-              <Text style={[styles.label, { color: theme.text }]}>Select Grid Size:</Text>
-
-              <View style={styles.sizeButtons}>
-                {[4, 5, 6].map((size) => (
-                  <TouchableOpacity
-                    key={size}
-                    style={[
-                      styles.sizeButton,
-                      {
-                        backgroundColor: gridSize === size ? theme.selectedTile : theme.button,
-                      },
-                    ]}
-                    onPress={() => setGridSize(size)}
-                  >
-                    <Text
+                <View style={styles.sizeButtons}>
+                  {[4, 5, 6].map((size) => (
+                    <TouchableOpacity
+                      key={size}
                       style={[
-                        styles.sizeButtonText,
+                        styles.sizeButton,
                         {
-                          color: gridSize === size ? '#ffffff' : theme.buttonText,
+                          backgroundColor: gridSize === size ? theme.selectedTile : theme.button,
                         },
                       ]}
+                      onPress={() => setGridSize(size)}
                     >
-                      {size}x{size}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.sizeButtonText,
+                          {
+                            color: gridSize === size ? '#ffffff' : theme.buttonText,
+                          },
+                        ]}
+                      >
+                        {size}x{size}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={[styles.timeLimit, { color: theme.text }]}>
+                  Time Limit: {getTimeLimit(gridSize)} seconds
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.startButton, { backgroundColor: theme.selectedTile }]}
+                  onPress={startGame}
+                >
+                  <Text style={[styles.startButtonText, { color: '#ffffff' }]}>Start Game</Text>
+                </TouchableOpacity>
               </View>
 
-              <Text style={[styles.timeLimit, { color: theme.text }]}>
-                Time Limit: {getTimeLimit(gridSize)} seconds
-              </Text>
-
-              <TouchableOpacity
-                style={[styles.startButton, { backgroundColor: theme.selectedTile }]}
-                onPress={startGame}
-              >
-                <Text style={[styles.startButtonText, { color: '#ffffff' }]}>Start Game</Text>
-              </TouchableOpacity>
-            </View>
-
-            {renderHighScoresModal()}
-          </ScrollView>
-
-          <BannerAd
-            unitId={__DEV__ ? TestIds.BANNER : 
-              Platform.OS === 'ios' ? "ca-app-pub-7368779159802085/3609137514" : "ca-app-pub-7368779159802085/6628408902"}
-            size={BannerAdSize.FULL_BANNER}
-            requestOptions={{
-              requestNonPersonalizedAdsOnly: true,
-            }}
-            onAdFailedToLoad={(error) => console.log("Ad failed to load:", error)}
-          />
-        </View>
-      </SafeComponent>
+              {renderHighScoresModal()}
+            </ScrollView>
+          </View>
+        </SafeComponent>
+      </SafeAreaView>
     );
   }, [theme, isDarkMode, soundEnabled, saveSettings, gridSize, playerName, getTimeLimit, startGame, renderHighScoresModal, getDifficultyGradient]);
 
@@ -970,60 +973,75 @@ const GridZenGame = () => {
     const gradientColors = getDifficultyGradient(gridSize);
     
     return (
-      <SafeComponent fallback={<View style={styles.container}><Text>Game Error</Text></View>}>
-        <View style={[styles.container, { backgroundColor: theme.background }]}>
-          <View style={[styles.gradientBackground, {
-            backgroundColor: gradientColors[0],
-            opacity: 0.1
-          }]} />
-          
-          {/* GridZen2 Banner */}
-          <View style={styles.bannerContainer}>
-            <Image
-              source={require('./assets/images/gridzen2.png')}
-              style={styles.bannerImage}
-              resizeMode="contain"
-              onError={() => console.log('Banner image failed to load')}
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <SafeComponent fallback={<View style={styles.container}><Text>Game Error</Text></View>}>
+          <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={[styles.gradientBackground, {
+              backgroundColor: gradientColors[0],
+              opacity: 0.1
+            }]} />
+            
+            {/* GridZen2 Banner */}
+            <View style={styles.bannerContainer}>
+              <Image
+                source={require('./assets/images/gridzen2.png')}
+                style={styles.bannerImage}
+                resizeMode="contain"
+                onError={() => console.log('Banner image failed to load')}
+              />
+            </View>
+
+            <View style={styles.header}>
+              <Text style={[styles.headerText, { color: theme.text }]}>Moves: {moves}</Text>
+              <Text style={[styles.headerText, { color: theme.text }]}>Time: {timeLeft}s</Text>
+            </View>
+
+            <View style={styles.gridContainer}>
+              {grid.map((row, rowIndex) => (
+                <View key={rowIndex} style={styles.row}>
+                  {row.map((tile, colIndex) => renderTile(tile, rowIndex, colIndex))}
+                </View>
+              ))}
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: theme.button, marginBottom: 20 }]}
+              onPress={() => {
+                if (timerRef.current) {
+                  clearTimeout(timerRef.current);
+                  timerRef.current = null;
+                }
+                playSound('gameover');
+                setGameState('menu');
+              }}
+            >
+              <Text style={[styles.buttonText, { color: theme.buttonText }]}>Give Up</Text>
+            </TouchableOpacity>
+
+            {/* Banner Ad for game screen */}
+            <View style={styles.gameAdContainer}>
+              <BannerAd
+                unitId={__DEV__ ? TestIds.BANNER : 
+                  Platform.OS === 'ios' ? "ca-app-pub-7368779159802085/3609137514" : "ca-app-pub-7368779159802085/6628408902"}
+                size={BannerAdSize.FULL_BANNER}
+                requestOptions={{
+                  requestNonPersonalizedAdsOnly: true,
+                }}
+                onAdFailedToLoad={(error) => console.log("Game ad failed to load:", error)}
+              />
+            </View>
+
+            {/* Confetti Cannon */}
+            <ConfettiCannon
+              ref={confettiRef}
+              count={200}
+              origin={{ x: screenWidth / 2, y: 0 }}
+              autoStart={false}
+              fadeOut={true}
             />
           </View>
-
-          <View style={styles.header}>
-            <Text style={[styles.headerText, { color: theme.text }]}>Moves: {moves}</Text>
-            <Text style={[styles.headerText, { color: theme.text }]}>Time: {timeLeft}s</Text>
-          </View>
-
-          <View style={styles.gridContainer}>
-            {grid.map((row, rowIndex) => (
-              <View key={rowIndex} style={styles.row}>
-                {row.map((tile, colIndex) => renderTile(tile, rowIndex, colIndex))}
-              </View>
-            ))}
-          </View>
-          
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: theme.button }]}
-            onPress={() => {
-              if (timerRef.current) {
-                clearTimeout(timerRef.current);
-                timerRef.current = null;
-              }
-              playSound('gameover');
-              setGameState('menu');
-            }}
-          >
-            <Text style={[styles.buttonText, { color: theme.buttonText }]}>Give Up</Text>
-          </TouchableOpacity>
-
-          {/* Confetti Cannon */}
-          <ConfettiCannon
-            ref={confettiRef}
-            count={200}
-            origin={{ x: screenWidth / 2, y: 0 }}
-            autoStart={false}
-            fadeOut={true}
-          />
-        </View>
-      </SafeComponent>
+        </SafeComponent>
+      </SafeAreaView>
     );
   }, [theme, moves, timeLeft, grid, renderTile, playSound, gridSize, getDifficultyGradient]);
 
@@ -1122,10 +1140,11 @@ const styles = StyleSheet.create({
     maxWidth: 300,
   },
   title: {
-    fontSize: Math.min(36, screenWidth * 0.1),
+    fontSize: Math.min(32, screenWidth * 0.09),
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 20,
+    marginTop: 10,
+    marginBottom: 15,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
@@ -1433,6 +1452,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     padding: 20,
     fontStyle: 'italic',
+  },
+  gameAdContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
 });
 
