@@ -13,12 +13,13 @@ import {
   Platform,
   Animated,
   UIManager,
-  Image
+  Image,
+  LinearGradient
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { Audio } from 'expo-audio';
-// import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
 import ConfettiCannon from 'react-native-confetti-cannon';
 
 // Enable LayoutAnimation on Android to avoid crashes related to animated layout changes
@@ -162,11 +163,17 @@ const GridZenGame = () => {
     }
   }, []);
 
-  // Enhanced sound loading with expo-audio API
+  // Enhanced sound loading with expo-audio API (properly handled)
   const loadSounds = useCallback(async () => {
     if (isUnmountedRef.current) return;
 
     try {
+      // expo-audio might not be available or properly loaded
+      if (!Audio || !Audio.Sound) {
+        console.log('Audio not available, continuing without sounds');
+        return;
+      }
+
       // Load sounds with expo-audio API
       try {
         const gameOverSoundObject = await Audio.Sound.createAsync(
@@ -831,7 +838,7 @@ const GridZenGame = () => {
     );
   }, [showHighScores, selectedDifficulty, highScores, theme, resetHighScores]);
 
-  // Enhanced menu rendering with gradient background
+  // Enhanced menu rendering with gradient background - FIXED: Removed 3 from grid sizes
   const renderMenu = useCallback(() => {
     const gradientColors = getDifficultyGradient(gridSize);
     
@@ -839,7 +846,8 @@ const GridZenGame = () => {
       <SafeComponent fallback={<View style={styles.container}><Text>Loading...</Text></View>}>
         <View style={[styles.container, { backgroundColor: theme.background, flex: 1 }]}>
           <View style={[styles.gradientBackground, {
-            background: `linear-gradient(135deg, ${gradientColors[0]}, ${gradientColors[1]})`
+            backgroundColor: gradientColors[0],
+            opacity: 0.1
           }]} />
           <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
             <Text style={[styles.title, { color: theme.text }]}>GridZen</Text>
@@ -943,17 +951,15 @@ const GridZenGame = () => {
             {renderHighScoresModal()}
           </ScrollView>
 
-          {/* Ads temporarily disabled for testing */}
-          {/* 
           <BannerAd
-            unitId={__DEV__ ? TestIds.BANNER : "ca-app-pub-7368779159802085/6628408902"}
+            unitId={__DEV__ ? TestIds.BANNER : 
+              Platform.OS === 'ios' ? "ca-app-pub-7368779159802085/3609137514" : "ca-app-pub-7368779159802085/6628408902"}
             size={BannerAdSize.FULL_BANNER}
             requestOptions={{
               requestNonPersonalizedAdsOnly: true,
             }}
             onAdFailedToLoad={(error) => console.log("Ad failed to load:", error)}
           />
-          */}
         </View>
       </SafeComponent>
     );
@@ -967,7 +973,8 @@ const GridZenGame = () => {
       <SafeComponent fallback={<View style={styles.container}><Text>Game Error</Text></View>}>
         <View style={[styles.container, { backgroundColor: theme.background }]}>
           <View style={[styles.gradientBackground, {
-            background: `linear-gradient(135deg, ${gradientColors[0]}, ${gradientColors[1]})`
+            backgroundColor: gradientColors[0],
+            opacity: 0.1
           }]} />
           
           {/* GridZen2 Banner */}
@@ -1077,7 +1084,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    opacity: 0.1,
     zIndex: 0,
   },
   loadingContainer: {
