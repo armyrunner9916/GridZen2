@@ -2,7 +2,7 @@
   "expo": {
     "name": "GridZen 2",
     "slug": "gridzen2",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/playstore.png",
     "userInterfaceStyle": "automatic",
@@ -20,15 +20,21 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSUserTrackingUsageDescription": "This app uses tracking to provide personalized ads and improve user experience.",
+        "SKAdNetworkItems": [
+          {
+            "SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork"
+          }
+        ]
       }
     },
     "android": {
       "package": "com.steveomatic.gridzen2",
-      "versionCode": 1,
+      "versionCode": 2,
       "edgeToEdgeEnabled": true,
       "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292",
       "adaptiveIcon": {
@@ -37,7 +43,8 @@
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "com.google.android.gms.permission.AD_ID"
       ]
     },
     "web": {
@@ -50,7 +57,8 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-7368779159802085~6120308292",
-          "iosAppId": "ca-app-pub-7368779159802085~2981633317"
+          "iosAppId": "ca-app-pub-7368779159802085~2981633317",
+          "userTrackingUsageDescription": "This app uses tracking to provide personalized ads and improve user experience."
         }
       ]
     ],
@@ -59,6 +67,9 @@
         "projectId": "097415cf-2740-4202-97bf-f982d7642265"
       }
     },
-    "owner": "armyrunne9916"
+    "owner": "armyrunne9916",
+    "description": "GridZen 2 - The ultimate number tile puzzle game featuring classic random challenges and pre-designed puzzle modes with power-ups. Sort numbered tiles in the correct order with smooth animations and rainbow backgrounds.",
+    "keywords": ["puzzle", "tiles", "numbers", "brain", "challenge", "grid", "zen", "power-ups", "rainbow"],
+    "category": "games"
   }
 }

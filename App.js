@@ -29,6 +29,46 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+// Pre-designed puzzle configurations
+const PUZZLE_PACKS = {
+  beginner: [
+    { name: "First Steps", gridSize: 4, maxMoves: 3, timeLimit: 45, 
+      startGrid: [2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16] },
+    { name: "Corner Twist", gridSize: 4, maxMoves: 5, timeLimit: 60,
+      startGrid: [1,2,3,4,5,6,7,8,13,10,11,12,9,14,15,16] },
+    { name: "Ring Around", gridSize: 4, maxMoves: 7, timeLimit: 75,
+      startGrid: [2,3,4,1,6,7,8,5,10,11,12,9,14,15,16,13] },
+    { name: "Cross Pattern", gridSize: 4, maxMoves: 9, timeLimit: 90,
+      startGrid: [1,6,3,4,5,2,7,8,9,10,15,12,13,14,11,16] },
+    { name: "Diagonal Shift", gridSize: 4, maxMoves: 11, timeLimit: 105,
+      startGrid: [5,2,3,4,1,10,7,8,9,6,15,12,13,14,11,16] }
+  ],
+  intermediate: [
+    { name: "Pentagon", gridSize: 5, maxMoves: 12, timeLimit: 120,
+      startGrid: [2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25] },
+    { name: "Star Pattern", gridSize: 5, maxMoves: 15, timeLimit: 150,
+      startGrid: [1,2,8,4,5,6,7,3,9,10,11,12,18,14,15,16,17,13,19,20,21,22,23,24,25] },
+    { name: "Spiral", gridSize: 5, maxMoves: 18, timeLimit: 180,
+      startGrid: [2,3,4,5,1,7,8,9,10,6,12,13,14,15,11,17,18,19,20,16,22,23,24,25,21] }
+  ],
+  advanced: [
+    { name: "Hexagon", gridSize: 6, maxMoves: 20, timeLimit: 240,
+      startGrid: Array.from({length: 36}, (_, i) => i + 1).sort(() => Math.random() - 0.5) },
+    { name: "Double Helix", gridSize: 6, maxMoves: 25, timeLimit: 300,
+      startGrid: Array.from({length: 36}, (_, i) => i + 1).sort(() => Math.random() - 0.5) },
+    { name: "Master Challenge", gridSize: 6, maxMoves: 30, timeLimit: 360,
+      startGrid: Array.from({length: 36}, (_, i) => i + 1).sort(() => Math.random() - 0.5) }
+  ]
+};
+
+// Power-up types
+const POWER_UP_TYPES = {
+  FREEZE_TIME: { icon: '❄️', name: 'Freeze Time', description: '+15 seconds' },
+  SWAP_ANY: { icon: '🔄', name: 'Teleport', description: 'Swap any two tiles' },
+  AUTO_SOLVE: { icon: '✨', name: 'Hint', description: 'Auto-solve 2 tiles' },
+  DOUBLE_MOVE: { icon: '⚡', name: 'Free Move', description: 'Next move is free' }
+};
+
 // Enhanced error boundary wrapper
 const SafeComponent = ({ children, fallback = null }) => {
   try {
@@ -59,9 +99,50 @@ const generateDistinctColors = (count) => {
   }
 };
 
+// Rainbow gradient animation
+const RainbowBackground = ({ isDarkMode }) => {
+  const animatedValue = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(animatedValue, {
+        toValue: 1,
+        duration: 10000,
+        useNativeDriver: false,
+      })
+    );
+    animation.start();
+    
+    return () => animation.stop();
+  }, []);
+
+  const backgroundColor = animatedValue.interpolate({
+    inputRange: [0, 0.16, 0.33, 0.5, 0.66, 0.83, 1],
+    outputRange: [
+      'rgba(255, 0, 0, 0.1)',
+      'rgba(255, 165, 0, 0.1)',
+      'rgba(255, 255, 0, 0.1)',
+      'rgba(0, 255, 0, 0.1)',
+      'rgba(0, 0, 255, 0.1)',
+      'rgba(75, 0, 130, 0.1)',
+      'rgba(238, 130, 238, 0.1)'
+    ]
+  });
+
+  return (
+    <Animated.View 
+      style={[
+        styles.rainbowBackground,
+        { backgroundColor }
+      ]} 
+    />
+  );
+};
+
 // Game component
 const GridZenGame = () => {
   const [gameState, setGameState] = useState('splash');
+  const [gameMode, setGameMode] = useState('classic'); // 'classic' or 'puzzle'
   const [gridSize, setGridSize] = useState(4);
   const [grid, setGrid] = useState([]);
   const [targetGrid, setTargetGrid] = useState([]);
@@ -73,9 +154,22 @@ const GridZenGame = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [showHighScores, setShowHighScores] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showGridSizeModal, setShowGridSizeModal] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState('4x4');
   const [isInitialized, setIsInitialized] = useState(false);
   const [animatingTiles, setAnimatingTiles] = useState(new Set());
+  
+  // Puzzle mode states
+  const [currentPuzzlePack, setCurrentPuzzlePack] = useState('beginner');
+  const [currentPuzzleIndex, setCurrentPuzzleIndex] = useState(0);
+  const [showPuzzleSelect, setShowPuzzleSelect] = useState(false);
+  const [maxMoves, setMaxMoves] = useState(0);
+  
+  // Power-ups states
+  const [powerUps, setPowerUps] = useState([]);
+  const [selectedPowerUp, setSelectedPowerUp] = useState(null);
+  const [showPowerUpModal, setShowPowerUpModal] = useState(false);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -235,13 +329,79 @@ const GridZenGame = () => {
     input: isDarkMode ? '#333333' : '#f5f5f5',
     inputText: isDarkMode ? '#ffffff' : '#000000',
     border: isDarkMode ? '#444444' : '#cccccc',
+    gridBox: isDarkMode ? '#000000' : '#ffffff',
+    numberBorder: isDarkMode ? '#ffffff' : '#000000',
   }), [isDarkMode]);
 
   // Time limits based on grid size - memoized
   const getTimeLimit = useCallback((size) => {
+    if (gameMode === 'puzzle') {
+      const puzzle = PUZZLE_PACKS[currentPuzzlePack]?.[currentPuzzleIndex];
+      return puzzle?.timeLimit || 60;
+    }
     const timeLimits = { 4: 60, 5: 90, 6: 120 };
     return timeLimits[size] || 60;
-  }, []);
+  }, [gameMode, currentPuzzlePack, currentPuzzleIndex]);
+
+  // Generate power-up randomly
+  const generatePowerUp = useCallback(() => {
+    if (gameMode === 'classic' && Math.random() < 0.15) { // 15% chance
+      const powerUpTypes = Object.keys(POWER_UP_TYPES);
+      const randomType = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
+      return {
+        id: Date.now(),
+        type: randomType,
+        ...POWER_UP_TYPES[randomType]
+      };
+    }
+    return null;
+  }, [gameMode]);
+
+  // Use power-up
+  const usePowerUp = useCallback((powerUpType) => {
+    switch (powerUpType) {
+      case 'FREEZE_TIME':
+        setTimeLeft(prev => prev + 15);
+        break;
+      case 'SWAP_ANY':
+        setSelectedPowerUp('SWAP_ANY');
+        break;
+      case 'AUTO_SOLVE':
+        // Auto-solve logic - find first two out-of-place tiles and place them correctly
+        const newGrid = [...grid];
+        let fixed = 0;
+        for (let i = 0; i < gridSize && fixed < 2; i++) {
+          for (let j = 0; j < gridSize && fixed < 2; j++) {
+            const expectedNumber = i * gridSize + j + 1;
+            if (newGrid[i][j].number !== expectedNumber) {
+              // Find where the correct number is
+              for (let x = 0; x < gridSize; x++) {
+                for (let y = 0; y < gridSize; y++) {
+                  if (newGrid[x][y].number === expectedNumber) {
+                    // Swap the tiles
+                    const temp = newGrid[i][j];
+                    newGrid[i][j] = newGrid[x][y];
+                    newGrid[x][y] = temp;
+                    fixed++;
+                    break;
+                  }
+                }
+                if (fixed > 0) break;
+              }
+            }
+          }
+        }
+        setGrid(newGrid);
+        break;
+      case 'DOUBLE_MOVE':
+        setSelectedPowerUp('DOUBLE_MOVE');
+        break;
+    }
+    
+    // Remove used power-up
+    setPowerUps(prev => prev.filter(p => p.type !== powerUpType));
+    setShowPowerUpModal(false);
+  }, [grid, gridSize]);
 
   // Initialize tile animations
   const initializeTileAnimation = useCallback((row, col) => {
@@ -263,7 +423,7 @@ const GridZenGame = () => {
     const fromAnim = initializeTileAnimation(fromPos.row, fromPos.col);
     const toAnim = initializeTileAnimation(toPos.row, toPos.col);
     
-    const tileSize = Math.max(40, (screenWidth - 60) / gridSize - 10);
+    const tileSize = Math.max(40, (screenWidth - 100) / gridSize - 10);
     const spacing = tileSize + 10;
     
     const deltaX = (toPos.col - fromPos.col) * spacing;
@@ -275,7 +435,7 @@ const GridZenGame = () => {
       Animated.timing(fromAnim.translateX, {
         toValue: deltaX,
         duration: 250,
-        useNativeDriver: Platform.OS === 'ios', // Only use native driver on iOS
+        useNativeDriver: Platform.OS === 'ios',
       }),
       Animated.timing(fromAnim.translateY, {
         toValue: deltaY,
@@ -295,7 +455,6 @@ const GridZenGame = () => {
     ];
     
     Animated.parallel(animations).start(() => {
-      // Reset animations with small delay for Android
       setTimeout(() => {
         fromAnim.translateX.setValue(0);
         fromAnim.translateY.setValue(0);
@@ -315,12 +474,11 @@ const GridZenGame = () => {
   // Enhanced initial data loading
   const loadInitialData = useCallback(async () => {
     try {
-      // Load all data in parallel for better performance
       const [savedScores, savedName, savedDarkMode, savedSound] = await Promise.all([
-        safeAsyncStorage.getItem('gridzen_highscores'),
-        safeAsyncStorage.getItem('gridzen_playername'),
-        safeAsyncStorage.getItem('darkMode'),
-        safeAsyncStorage.getItem('soundOn')
+        safeAsyncStorage.getItem('gridzen2_highscores'),
+        safeAsyncStorage.getItem('gridzen2_playername'),
+        safeAsyncStorage.getItem('gridzen2_darkMode'),
+        safeAsyncStorage.getItem('gridzen2_soundOn')
       ]);
 
       if (!isUnmountedRef.current) {
@@ -348,7 +506,6 @@ const GridZenGame = () => {
           }
         }
 
-        // Enhanced splash screen transition
         setTimeout(() => {
           if (!isUnmountedRef.current) {
             Animated.timing(fadeAnim, {
@@ -366,7 +523,7 @@ const GridZenGame = () => {
       }
     } catch (error) {
       console.log('Load initial data error:', error);
-      throw error; // Re-throw to handle in initialize
+      throw error;
     }
   }, [fadeAnim]);
 
@@ -374,19 +531,15 @@ const GridZenGame = () => {
   useEffect(() => {
     return () => {
       isUnmountedRef.current = true;
-
-      // Clear timer
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      
-      // Unload sounds safely
       unloadSounds();
     };
   }, [unloadSounds]);
 
-  // Initialize game and load data - enhanced error handling
+  // Initialize game and load data
   useEffect(() => {
     let isCancelled = false;
 
@@ -399,10 +552,8 @@ const GridZenGame = () => {
         }
       } catch (error) {
         console.log('Initialization error:', error);
-        // Continue with default state
         if (!isCancelled && !isUnmountedRef.current) {
           setIsInitialized(true);
-          // Still show menu even if initialization fails
           setTimeout(() => {
             if (!isUnmountedRef.current) {
               fadeAnim.setValue(1);
@@ -414,11 +565,8 @@ const GridZenGame = () => {
     };
 
     initialize();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []); // Remove dependencies to avoid re-initialization
+    return () => { isCancelled = true; };
+  }, []);
 
   // Enhanced game over handling
   const handleGameOver = useCallback(() => {
@@ -433,18 +581,20 @@ const GridZenGame = () => {
       
       playSound('gameover');
       
-      Alert.alert(
-        'Time\'s Up!',
-        'You ran out of time. Try again!',
-        [{ text: 'OK', onPress: () => setGameState('menu') }]
-      );
+      const message = gameMode === 'puzzle' 
+        ? `Puzzle failed! You used ${moves}/${maxMoves} moves.`
+        : 'You ran out of time. Try again!';
+      
+      Alert.alert('Game Over!', message, [
+        { text: 'OK', onPress: () => setGameState('menu') }
+      ]);
     } catch (error) {
       console.log('Game over handling error:', error);
       setGameState('menu');
     }
-  }, [playSound]);
+  }, [playSound, gameMode, moves, maxMoves]);
 
-  // Enhanced timer effect with better cleanup
+  // Enhanced timer effect
   useEffect(() => {
     if (gameState === 'playing' && timeLeft > 0 && !isUnmountedRef.current) {
       timerRef.current = setTimeout(() => {
@@ -468,8 +618,8 @@ const GridZenGame = () => {
   const saveSettings = useCallback(async () => {
     try {
       await Promise.all([
-        safeAsyncStorage.setItem('darkMode', JSON.stringify(isDarkMode)),
-        safeAsyncStorage.setItem('soundOn', JSON.stringify(soundEnabled))
+        safeAsyncStorage.setItem('gridzen2_darkMode', JSON.stringify(isDarkMode)),
+        safeAsyncStorage.setItem('gridzen2_soundOn', JSON.stringify(soundEnabled))
       ]);
     } catch (error) {
       console.log('Settings save error:', error);
@@ -479,7 +629,7 @@ const GridZenGame = () => {
   // Enhanced high scores save
   const saveHighScores = useCallback(async (scores) => {
     try {
-      await safeAsyncStorage.setItem('gridzen_highscores', JSON.stringify(scores));
+      await safeAsyncStorage.setItem('gridzen2_highscores', JSON.stringify(scores));
     } catch (error) {
       console.log('High scores save error:', error);
     }
@@ -488,18 +638,17 @@ const GridZenGame = () => {
   // Enhanced player name save
   const savePlayerName = useCallback(async (name) => {
     try {
-      await safeAsyncStorage.setItem('gridzen_playername', name);
+      await safeAsyncStorage.setItem('gridzen2_playername', name);
     } catch (error) {
       console.log('Player name save error:', error);
     }
   }, []);
 
-  // Enhanced grid initialization with error handling
+  // Enhanced grid initialization with puzzle support
   const initializeGrid = useCallback(() => {
     try {
       const size = gridSize * gridSize;
       const colors = generateDistinctColors(size);
-      const numbers = Array.from({ length: size }, (_, i) => i + 1);
 
       // Create target grid (numbers in order)
       const target = [];
@@ -514,13 +663,23 @@ const GridZenGame = () => {
       }
       setTargetGrid(target);
 
-      // Create shuffled grid - ensure it's solvable
-      let shuffled;
-      let attempts = 0;
-      do {
-        shuffled = [...numbers].sort(() => Math.random() - 0.5);
-        attempts++;
-      } while (JSON.stringify(shuffled) === JSON.stringify(numbers) && attempts < 10);
+      let numbers;
+      if (gameMode === 'puzzle') {
+        const puzzle = PUZZLE_PACKS[currentPuzzlePack]?.[currentPuzzleIndex];
+        if (puzzle) {
+          numbers = [...puzzle.startGrid];
+          setMaxMoves(puzzle.maxMoves);
+        } else {
+          numbers = Array.from({ length: size }, (_, i) => i + 1);
+        }
+      } else {
+        numbers = Array.from({ length: size }, (_, i) => i + 1);
+        let attempts = 0;
+        do {
+          numbers = numbers.sort(() => Math.random() - 0.5);
+          attempts++;
+        } while (JSON.stringify(numbers) === JSON.stringify(Array.from({ length: size }, (_, i) => i + 1)) && attempts < 10);
+      }
 
       const newGrid = [];
       for (let i = 0; i < gridSize; i++) {
@@ -528,15 +687,14 @@ const GridZenGame = () => {
         for (let j = 0; j < gridSize; j++) {
           const index = i * gridSize + j;
           newGrid[i][j] = {
-            number: shuffled[index],
-            color: colors[shuffled[index] - 1],
+            number: numbers[index],
+            color: colors[numbers[index] - 1],
           };
         }
       }
       setGrid(newGrid);
     } catch (error) {
       console.log('Grid initialization error:', error);
-      // Fallback to simple grid
       const fallbackGrid = Array(gridSize).fill().map((_, i) => 
         Array(gridSize).fill().map((_, j) => ({
           number: i * gridSize + j + 1,
@@ -546,9 +704,9 @@ const GridZenGame = () => {
       setGrid(fallbackGrid);
       setTargetGrid(fallbackGrid);
     }
-  }, [gridSize]);
+  }, [gridSize, gameMode, currentPuzzlePack, currentPuzzleIndex]);
 
-  // Enhanced start game with validation
+  // Enhanced start game with puzzle support
   const startGame = useCallback(() => {
     try {
       if (!playerName.trim()) {
@@ -561,8 +719,8 @@ const GridZenGame = () => {
       setMoves(0);
       setTimeLeft(getTimeLimit(gridSize));
       setSelectedTile(null);
-      // Force grid size update before initializing
-      setGridSize(gridSize);
+      setPowerUps([]);
+      setSelectedPowerUp(null);
       initializeGrid();
     } catch (error) {
       console.log('Start game error:', error);
@@ -589,7 +747,7 @@ const GridZenGame = () => {
     }
   }, [gridSize]);
 
-  // Enhanced win handling with confetti
+  // Enhanced win handling with puzzle progression
   const handleWin = useCallback(() => {
     if (isUnmountedRef.current) return;
 
@@ -600,17 +758,25 @@ const GridZenGame = () => {
         timerRef.current = null;
       }
       
-      // Fire confetti
       if (confettiRef.current) {
         confettiRef.current.start();
       }
       
-      const scoreKey = `${gridSize}x${gridSize}`;
+      const scoreKey = gameMode === 'puzzle' 
+        ? `puzzle-${currentPuzzlePack}-${currentPuzzleIndex}`
+        : `${gridSize}x${gridSize}`;
+        
       const newScore = {
         name: playerName,
         moves: moves,
         timeRemaining: timeLeft,
         date: new Date().toLocaleDateString(),
+        mode: gameMode,
+        ...(gameMode === 'puzzle' && { 
+          puzzlePack: currentPuzzlePack, 
+          puzzleIndex: currentPuzzleIndex,
+          maxMoves: maxMoves
+        })
       };
       
       const updatedScores = { ...highScores };
@@ -624,25 +790,54 @@ const GridZenGame = () => {
       
       setHighScores(updatedScores);
       saveHighScores(updatedScores);
-      
       playSound('victory');
       
-      Alert.alert(
-        'Congratulations!',
-        `You won in ${moves} moves with ${timeLeft} seconds remaining!`,
-        [{ text: 'OK', onPress: () => setGameState('menu') }]
-      );
+      let message = `You won in ${moves} moves with ${timeLeft} seconds remaining!`;
+      if (gameMode === 'puzzle') {
+        message = `Puzzle solved in ${moves}/${maxMoves} moves!`;
+        if (currentPuzzleIndex < PUZZLE_PACKS[currentPuzzlePack].length - 1) {
+          message += '\nNext puzzle unlocked!';
+        }
+      }
+      
+      Alert.alert('Congratulations!', message, [
+        { text: 'OK', onPress: () => setGameState('menu') }
+      ]);
     } catch (error) {
       console.log('Win handling error:', error);
       setGameState('menu');
     }
-  }, [gridSize, playerName, moves, timeLeft, highScores, saveHighScores, playSound]);
+  }, [gridSize, playerName, moves, timeLeft, highScores, saveHighScores, playSound, gameMode, currentPuzzlePack, currentPuzzleIndex, maxMoves]);
 
-  // Enhanced tile press handling with smooth animation
+  // Enhanced tile press handling with power-ups
   const handleTilePress = useCallback((row, col) => {
     if (gameState !== 'playing' || isUnmountedRef.current) return;
 
     try {
+      // Special handling for SWAP_ANY power-up
+      if (selectedPowerUp === 'SWAP_ANY') {
+        if (!selectedTile) {
+          setSelectedTile({ row, col });
+        } else {
+          // Swap any two tiles
+          const { row: selRow, col: selCol } = selectedTile;
+          const newGrid = grid.map(gridRow => [...gridRow]);
+          const temp = newGrid[row][col];
+          newGrid[row][col] = newGrid[selRow][selCol];
+          newGrid[selRow][selCol] = temp;
+          
+          setGrid(newGrid);
+          setMoves(prev => prev + 1);
+          setSelectedTile(null);
+          setSelectedPowerUp(null);
+          
+          if (checkWin(newGrid)) {
+            setTimeout(() => handleWin(), 300);
+          }
+        }
+        return;
+      }
+
       if (!selectedTile) {
         setSelectedTile({ row, col });
       } else {
@@ -658,7 +853,13 @@ const GridZenGame = () => {
           (Math.abs(col - selCol) === 1 && row === selRow);
 
         if (isAdjacent) {
-          // Animate the swap
+          // Check puzzle mode move limit
+          if (gameMode === 'puzzle' && moves >= maxMoves) {
+            Alert.alert('No More Moves!', `You've used all ${maxMoves} moves for this puzzle.`);
+            handleGameOver();
+            return;
+          }
+
           animateTileSwap({ row: selRow, col: selCol }, { row, col });
           
           const newGrid = grid.map(gridRow => [...gridRow]);
@@ -667,11 +868,27 @@ const GridZenGame = () => {
           newGrid[selRow][selCol] = temp;
           
           setGrid(newGrid);
-          setMoves(prev => prev + 1);
+          
+          // Handle move counting and power-up generation
+          const isFreeMoveActive = selectedPowerUp === 'DOUBLE_MOVE';
+          if (!isFreeMoveActive) {
+            setMoves(prev => prev + 1);
+            
+            // Generate power-up occasionally in classic mode
+            if (gameMode === 'classic' && (moves + 1) % 8 === 0) {
+              const newPowerUp = generatePowerUp();
+              if (newPowerUp) {
+                setPowerUps(prev => [...prev, newPowerUp]);
+              }
+            }
+          } else {
+            setSelectedPowerUp(null); // Free move used
+          }
+          
           setSelectedTile(null);
           
           if (checkWin(newGrid)) {
-            setTimeout(() => handleWin(), 300); // Delay to let animation finish
+            setTimeout(() => handleWin(), 300);
           }
         } else {
           setSelectedTile({ row, col });
@@ -681,9 +898,9 @@ const GridZenGame = () => {
       console.log('Tile press error:', error);
       setSelectedTile(null);
     }
-  }, [gameState, selectedTile, grid, checkWin, handleWin, animateTileSwap]);
+  }, [gameState, selectedTile, grid, checkWin, handleWin, animateTileSwap, selectedPowerUp, gameMode, moves, maxMoves, handleGameOver, generatePowerUp]);
 
-  // Enhanced reset high scores
+  // Reset high scores
   const resetHighScores = useCallback(() => {
     Alert.alert(
       'Reset High Scores',
@@ -696,7 +913,7 @@ const GridZenGame = () => {
           onPress: async () => {
             try {
               setHighScores({});
-              await safeAsyncStorage.removeItem('gridzen_highscores');
+              await safeAsyncStorage.removeItem('gridzen2_highscores');
               Alert.alert('Success', 'All high scores have been reset.');
             } catch (error) {
               console.log('Reset scores error:', error);
@@ -708,18 +925,17 @@ const GridZenGame = () => {
     );
   }, []);
 
-  // Enhanced tile rendering with animation support
+  // Enhanced tile rendering with styled borders and power-up highlights
   const renderTile = useCallback((tile, row, col) => {
     try {
       if (!tile) return null;
 
       const isSelected = selectedTile && selectedTile.row === row && selectedTile.col === col;
-      const tileSize = Math.max(40, (screenWidth - 60) / gridSize - 10);
+      const tileSize = Math.max(40, (screenWidth - 100) / gridSize - 10);
       const key = `${row}-${col}`;
       const isAnimating = animatingTiles.has(key);
       const animation = initializeTileAnimation(row, col);
       
-      // Force re-render on Android if animation values are stuck
       if (Platform.OS === 'android' && !isAnimating) {
         animation.translateX.setValue(0);
         animation.translateY.setValue(0);
@@ -733,7 +949,7 @@ const GridZenGame = () => {
               { translateX: animation.translateX },
               { translateY: animation.translateY }
             ],
-            opacity: 1, // Ensure tile is always visible
+            opacity: 1,
           }}
         >
           <TouchableOpacity
@@ -746,10 +962,7 @@ const GridZenGame = () => {
                 borderColor: isSelected ? theme.selectedTile : theme.border,
                 borderWidth: isSelected ? 3 : 1,
                 shadowColor: '#000',
-                shadowOffset: {
-                  width: 0,
-                  height: 4,
-                },
+                shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.3,
                 shadowRadius: 4.65,
                 elevation: 8,
@@ -759,7 +972,16 @@ const GridZenGame = () => {
             activeOpacity={0.7}
             disabled={isAnimating}
           >
-            <Text style={[styles.tileText, { color: theme.text, fontSize: Math.min(24, tileSize / 3) }]}>
+            <Text style={[
+              styles.tileText, 
+              { 
+                color: theme.text, 
+                fontSize: Math.min(24, tileSize / 3),
+                textShadowColor: theme.numberBorder,
+                textShadowOffset: { width: 1, height: 1 },
+                textShadowRadius: 1,
+              }
+            ]}>
               {tile.number || '?'}
             </Text>
           </TouchableOpacity>
@@ -777,6 +999,213 @@ const GridZenGame = () => {
       );
     }
   }, [selectedTile, gridSize, theme, handleTilePress, animatingTiles, initializeTileAnimation]);
+
+  // Settings modal
+  const renderSettingsModal = useCallback(() => {
+    return (
+      <Modal
+        visible={showSettings}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowSettings(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.background }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Settings</Text>
+            
+            <View style={styles.settingsContainer}>
+              <View style={styles.settingRow}>
+                <Text style={[styles.settingLabel, { color: theme.text }]}>Dark Mode</Text>
+                <Switch
+                  value={isDarkMode}
+                  onValueChange={(value) => {
+                    setIsDarkMode(value);
+                    saveSettings();
+                  }}
+                  trackColor={{ false: '#767577', true: '#81b0ff' }}
+                  thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
+                />
+              </View>
+
+              <View style={styles.settingRow}>
+                <Text style={[styles.settingLabel, { color: theme.text }]}>
+                  Sounds {soundEnabled ? '🔔' : '🔕'}
+                </Text>
+                <Switch
+                  value={soundEnabled}
+                  onValueChange={(value) => {
+                    setSoundEnabled(value);
+                    saveSettings();
+                  }}
+                  trackColor={{ false: '#767577', true: '#81b0ff' }}
+                  thumbColor={soundEnabled ? '#f5dd4b' : '#f4f3f4'}
+                />
+              </View>
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: theme.button, marginTop: 20 }]}
+              onPress={() => setShowSettings(false)}
+            >
+              <Text style={[styles.buttonText, { color: theme.buttonText }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  }, [showSettings, theme, isDarkMode, soundEnabled, saveSettings]);
+
+  // Grid size selection modal
+  const renderGridSizeModal = useCallback(() => {
+    return (
+      <Modal
+        visible={showGridSizeModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowGridSizeModal(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+          <View style={[styles.gridSizeModal, { backgroundColor: theme.background }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Select Grid Size</Text>
+            
+            <View style={[styles.pickerContainer, { backgroundColor: theme.input }]}>
+              <Picker
+                selectedValue={gridSize}
+                onValueChange={(value) => setGridSize(value)}
+                style={{ color: theme.inputText }}
+              >
+                <Picker.Item label="4x4 Grid" value={4} />
+                <Picker.Item label="5x5 Grid" value={5} />
+                <Picker.Item label="6x6 Grid" value={6} />
+              </Picker>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.selectedTile, flex: 1, marginRight: 10 }]}
+                onPress={() => setShowGridSizeModal(false)}
+              >
+                <Text style={[styles.buttonText, { color: '#ffffff' }]}>Confirm</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.button, flex: 1 }]}
+                onPress={() => setShowGridSizeModal(false)}
+              >
+                <Text style={[styles.buttonText, { color: theme.buttonText }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }, [showGridSizeModal, theme, gridSize]);
+
+  // Power-up modal rendering
+  const renderPowerUpModal = useCallback(() => {
+    if (powerUps.length === 0) return null;
+
+    return (
+      <Modal
+        visible={showPowerUpModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowPowerUpModal(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.8)' }]}>
+          <View style={[styles.powerUpModal, { backgroundColor: theme.background }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Power-Up Available!</Text>
+            {powerUps.map((powerUp) => (
+              <TouchableOpacity
+                key={powerUp.id}
+                style={[styles.powerUpButton, { backgroundColor: theme.button }]}
+                onPress={() => usePowerUp(powerUp.type)}
+              >
+                <Text style={styles.powerUpIcon}>{powerUp.icon}</Text>
+                <View style={styles.powerUpInfo}>
+                  <Text style={[styles.powerUpName, { color: theme.buttonText }]}>{powerUp.name}</Text>
+                  <Text style={[styles.powerUpDescription, { color: theme.buttonText }]}>{powerUp.description}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: theme.border, marginTop: 10 }]}
+              onPress={() => setShowPowerUpModal(false)}
+            >
+              <Text style={[styles.buttonText, { color: theme.buttonText }]}>Later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  }, [powerUps, showPowerUpModal, theme, usePowerUp]);
+
+  // Puzzle selection modal
+  const renderPuzzleSelectModal = useCallback(() => {
+    return (
+      <Modal
+        visible={showPuzzleSelect}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPuzzleSelect(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.background }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Select Puzzle Pack</Text>
+            
+            <ScrollView style={styles.puzzlePackContainer}>
+              {Object.entries(PUZZLE_PACKS).map(([packName, puzzles]) => (
+                <View key={packName} style={styles.puzzlePackSection}>
+                  <Text style={[styles.puzzlePackTitle, { color: theme.text }]}>
+                    {packName.charAt(0).toUpperCase() + packName.slice(1)}
+                  </Text>
+                  {puzzles.map((puzzle, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.puzzleItem,
+                        { 
+                          backgroundColor: theme.button,
+                          opacity: currentPuzzlePack === packName && currentPuzzleIndex === index ? 0.7 : 1
+                        }
+                      ]}
+                      onPress={() => {
+                        setCurrentPuzzlePack(packName);
+                        setCurrentPuzzleIndex(index);
+                        setGridSize(puzzle.gridSize);
+                      }}
+                    >
+                      <Text style={[styles.puzzleName, { color: theme.buttonText }]}>{puzzle.name}</Text>
+                      <Text style={[styles.puzzleDetails, { color: theme.buttonText }]}>
+                        {puzzle.gridSize}x{puzzle.gridSize} • Max {puzzle.maxMoves} moves • {puzzle.timeLimit}s
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.selectedTile, flex: 1, marginRight: 10 }]}
+                onPress={() => {
+                  setShowPuzzleSelect(false);
+                  startGame();
+                }}
+              >
+                <Text style={[styles.buttonText, { color: '#ffffff' }]}>Start Puzzle</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: theme.button, flex: 1 }]}
+                onPress={() => setShowPuzzleSelect(false)}
+              >
+                <Text style={[styles.buttonText, { color: theme.buttonText }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }, [showPuzzleSelect, theme, currentPuzzlePack, currentPuzzleIndex, startGame]);
 
   // Enhanced high scores modal rendering
   const renderHighScoresModal = useCallback(() => {
@@ -807,9 +1236,12 @@ const GridZenGame = () => {
                   onValueChange={setSelectedDifficulty}
                   style={{ color: theme.inputText }}
                 >
-                  <Picker.Item label="4x4" value="4x4" />
-                  <Picker.Item label="5x5" value="5x5" />
-                  <Picker.Item label="6x6" value="6x6" />
+                  <Picker.Item label="Classic 4x4" value="4x4" />
+                  <Picker.Item label="Classic 5x5" value="5x5" />
+                  <Picker.Item label="Classic 6x6" value="6x6" />
+                  <Picker.Item label="Beginner Puzzles" value="puzzle-beginner" />
+                  <Picker.Item label="Intermediate Puzzles" value="puzzle-intermediate" />
+                  <Picker.Item label="Advanced Puzzles" value="puzzle-advanced" />
                 </Picker>
               </View>
               
@@ -822,6 +1254,7 @@ const GridZenGame = () => {
                         <Text style={[styles.scoreName, { color: theme.text }]}>{score.name}</Text>
                         <Text style={[styles.scoreDetails, { color: theme.text }]}>
                           {score.moves} moves • {score.timeRemaining}s left
+                          {score.mode === 'puzzle' && ` • Max ${score.maxMoves}`}
                         </Text>
                         <Text style={[styles.scoreDate, { color: theme.text, opacity: 0.7 }]}>
                           {score.date}
@@ -849,56 +1282,34 @@ const GridZenGame = () => {
     );
   }, [showHighScores, selectedDifficulty, highScores, theme, resetHighScores]);
 
-  // Enhanced menu rendering with gradient background - FIXED: Removed 3 from grid sizes
+  // Enhanced menu rendering with streamlined UI
   const renderMenu = useCallback(() => {
-    const gradientColors = getDifficultyGradient(gridSize);
-    
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
         <SafeComponent fallback={<View style={styles.container}><Text>Loading...</Text></View>}>
           <View style={[styles.container, { backgroundColor: theme.background, flex: 1 }]}>
-            <View style={[styles.gradientBackground, {
-              backgroundColor: gradientColors[0],
-              opacity: 0.1
-            }]} />
+            <RainbowBackground isDarkMode={isDarkMode} />
+            
             <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={[styles.title, { color: theme.text }]}>GRIDZEN 2</Text>
-
-              <View style={styles.controls}>
-                <View style={styles.controlRow}>
-                  <Text style={[styles.controlLabel, { color: theme.text }]}>Dark Mode</Text>
-                  <Switch
-                    value={isDarkMode}
-                    onValueChange={(value) => {
-                      setIsDarkMode(value);
-                      saveSettings();
-                    }}
-                    trackColor={{ false: '#767577', true: '#81b0ff' }}
-                    thumbColor={isDarkMode ? '#f5dd4b' : '#f4f3f4'}
-                  />
-                </View>
-
+              {/* Streamlined Header */}
+              <View style={styles.headerContainer}>
+                <Text style={[styles.title, { color: theme.text }]}>GRIDZEN 2</Text>
                 <TouchableOpacity
-                  style={[styles.controlButton, { backgroundColor: theme.button }]}
+                  style={[styles.headerButton, { backgroundColor: theme.button }]}
+                  onPress={() => setShowSettings(true)}
+                >
+                  <Text style={[styles.headerButtonText, { color: theme.buttonText }]}>⚙️</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Quick Access Buttons */}
+              <View style={styles.quickAccessContainer}>
+                <TouchableOpacity
+                  style={[styles.quickAccessButton, { backgroundColor: theme.button }]}
                   onPress={() => setShowHighScores(true)}
                 >
-                  <Text style={[styles.buttonText, { color: theme.buttonText }]}>View High Scores</Text>
+                  <Text style={[styles.quickAccessButtonText, { color: theme.buttonText }]}>🏆</Text>
                 </TouchableOpacity>
-
-                <View style={styles.controlRow}>
-                  <Text style={[styles.controlLabel, { color: theme.text }]}>
-                    Sounds {soundEnabled ? '🔔' : '🔕'}
-                  </Text>
-                  <Switch
-                    value={soundEnabled}
-                    onValueChange={(value) => {
-                      setSoundEnabled(value);
-                      saveSettings();
-                    }}
-                    trackColor={{ false: '#767577', true: '#81b0ff' }}
-                    thumbColor={soundEnabled ? '#f5dd4b' : '#f4f3f4'}
-                  />
-                </View>
               </View>
 
               <View style={styles.menuContent}>
@@ -920,66 +1331,98 @@ const GridZenGame = () => {
                   maxLength={20}
                 />
 
-                <Text style={[styles.label, { color: theme.text }]}>Select Grid Size:</Text>
+                <Text style={[styles.label, { color: theme.text }]}>Select Game Mode:</Text>
 
-                <View style={styles.sizeButtons}>
-                  {[4, 5, 6].map((size) => (
-                    <TouchableOpacity
-                      key={size}
-                      style={[
-                        styles.sizeButton,
-                        {
-                          backgroundColor: gridSize === size ? theme.selectedTile : theme.button,
-                        },
-                      ]}
-                      onPress={() => setGridSize(size)}
-                    >
-                      <Text
-                        style={[
-                          styles.sizeButtonText,
-                          {
-                            color: gridSize === size ? '#ffffff' : theme.buttonText,
-                          },
-                        ]}
-                      >
-                        {size}x{size}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                {/* Compact Game Mode Buttons */}
+                <View style={styles.compactGameModeButtons}>
+                  <TouchableOpacity
+                    style={[
+                      styles.compactGameModeButton,
+                      { backgroundColor: gameMode === 'classic' ? theme.selectedTile : theme.button }
+                    ]}
+                    onPress={() => setGameMode('classic')}
+                  >
+                    <Text style={[styles.compactGameModeButtonText, { 
+                      color: gameMode === 'classic' ? '#ffffff' : theme.buttonText 
+                    }]}>🎲 Classic</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.compactGameModeButton,
+                      { backgroundColor: gameMode === 'puzzle' ? theme.selectedTile : theme.button }
+                    ]}
+                    onPress={() => setGameMode('puzzle')}
+                  >
+                    <Text style={[styles.compactGameModeButtonText, { 
+                      color: gameMode === 'puzzle' ? '#ffffff' : theme.buttonText 
+                    }]}>🧩 Puzzle</Text>
+                  </TouchableOpacity>
                 </View>
 
-                <Text style={[styles.timeLimit, { color: theme.text }]}>
-                  Time Limit: {getTimeLimit(gridSize)} seconds
-                </Text>
+                {gameMode === 'classic' ? (
+                  <>
+                    <Text style={[styles.label, { color: theme.text }]}>Grid Size:</Text>
+                    
+                    {/* Grid Size Selector */}
+                    <TouchableOpacity
+                      style={[styles.gridSizeSelector, { backgroundColor: theme.button }]}
+                      onPress={() => setShowGridSizeModal(true)}
+                    >
+                      <Text style={[styles.gridSizeSelectorText, { color: theme.buttonText }]}>
+                        {gridSize}x{gridSize} Grid
+                      </Text>
+                      <Text style={[styles.gridSizeSelectorArrow, { color: theme.buttonText }]}>▼</Text>
+                    </TouchableOpacity>
+                    
+                    <Text style={[styles.timeLimit, { color: theme.text }]}>
+                      Time Limit: {getTimeLimit(gridSize)} seconds
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.label, { color: theme.text }]}>
+                      Selected: {currentPuzzlePack} - {PUZZLE_PACKS[currentPuzzlePack]?.[currentPuzzleIndex]?.name || 'None'}
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.button, { backgroundColor: theme.button, marginBottom: 15 }]}
+                      onPress={() => setShowPuzzleSelect(true)}
+                    >
+                      <Text style={[styles.buttonText, { color: theme.buttonText }]}>Choose Puzzle</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
                 <TouchableOpacity
                   style={[styles.startButton, { backgroundColor: theme.selectedTile }]}
-                  onPress={startGame}
+                  onPress={gameMode === 'puzzle' ? () => setShowPuzzleSelect(true) : startGame}
                 >
-                  <Text style={[styles.startButtonText, { color: '#ffffff' }]}>Start Game</Text>
+                  <Text style={[styles.startButtonText, { color: '#ffffff' }]}>
+                    {gameMode === 'puzzle' ? 'Select & Start Puzzle' : 'Start Game'}
+                  </Text>
                 </TouchableOpacity>
               </View>
 
+              {renderSettingsModal()}
+              {renderGridSizeModal()}
               {renderHighScoresModal()}
+              {renderPuzzleSelectModal()}
             </ScrollView>
           </View>
         </SafeComponent>
       </SafeAreaView>
     );
-  }, [theme, isDarkMode, soundEnabled, saveSettings, gridSize, playerName, getTimeLimit, startGame, renderHighScoresModal, getDifficultyGradient]);
+  }, [theme, isDarkMode, playerName, gameMode, gridSize, getTimeLimit, startGame, currentPuzzlePack, currentPuzzleIndex, renderSettingsModal, renderGridSizeModal, renderHighScoresModal, renderPuzzleSelectModal]);
 
-  // Enhanced game rendering with banner and gradient
+  // Enhanced game rendering with rainbow background and styled grid
   const renderGame = useCallback(() => {
-    const gradientColors = getDifficultyGradient(gridSize);
+    const puzzle = gameMode === 'puzzle' ? PUZZLE_PACKS[currentPuzzlePack]?.[currentPuzzleIndex] : null;
     
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
         <SafeComponent fallback={<View style={styles.container}><Text>Game Error</Text></View>}>
           <View style={[styles.container, { backgroundColor: theme.background }]}>
-            <View style={[styles.gradientBackground, {
-              backgroundColor: gradientColors[0],
-              opacity: 0.1
-            }]} />
+            <RainbowBackground isDarkMode={isDarkMode} />
             
             {/* GridZen2 Banner */}
             <View style={styles.bannerContainer}>
@@ -992,17 +1435,47 @@ const GridZenGame = () => {
             </View>
 
             <View style={styles.header}>
-              <Text style={[styles.headerText, { color: theme.text }]}>Moves: {moves}</Text>
+              <Text style={[styles.headerText, { color: theme.text }]}>
+                Moves: {moves}{gameMode === 'puzzle' ? `/${maxMoves}` : ''}
+              </Text>
               <Text style={[styles.headerText, { color: theme.text }]}>Time: {timeLeft}s</Text>
             </View>
 
-            <View style={styles.gridContainer}>
-              {grid.map((row, rowIndex) => (
-                <View key={rowIndex} style={styles.row}>
-                  {row.map((tile, colIndex) => renderTile(tile, rowIndex, colIndex))}
-                </View>
-              ))}
+            {puzzle && (
+              <Text style={[styles.puzzleTitle, { color: theme.text }]}>
+                {puzzle.name} ({currentPuzzlePack})
+              </Text>
+            )}
+
+            {/* Styled Grid Container */}
+            <View style={[styles.styledGridContainer, { backgroundColor: theme.gridBox }]}>
+              <View style={styles.gridContainer}>
+                {grid.map((row, rowIndex) => (
+                  <View key={rowIndex} style={styles.row}>
+                    {row.map((tile, colIndex) => renderTile(tile, rowIndex, colIndex))}
+                  </View>
+                ))}
+              </View>
             </View>
+
+            {/* Power-ups display */}
+            {powerUps.length > 0 && (
+              <View style={styles.powerUpsContainer}>
+                <Text style={[styles.powerUpsTitle, { color: theme.text }]}>Power-ups Available:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {powerUps.map((powerUp) => (
+                    <TouchableOpacity
+                      key={powerUp.id}
+                      style={[styles.powerUpChip, { backgroundColor: theme.selectedTile }]}
+                      onPress={() => usePowerUp(powerUp.type)}
+                    >
+                      <Text style={styles.powerUpChipIcon}>{powerUp.icon}</Text>
+                      <Text style={[styles.powerUpChipText, { color: '#ffffff' }]}>{powerUp.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             
             <TouchableOpacity
               style={[styles.button, { backgroundColor: theme.button, marginBottom: 20 }]}
@@ -1039,11 +1512,13 @@ const GridZenGame = () => {
               autoStart={false}
               fadeOut={true}
             />
+
+            {renderPowerUpModal()}
           </View>
         </SafeComponent>
       </SafeAreaView>
     );
-  }, [theme, moves, timeLeft, grid, renderTile, playSound, gridSize, getDifficultyGradient]);
+  }, [theme, moves, maxMoves, timeLeft, grid, renderTile, playSound, gameMode, currentPuzzlePack, currentPuzzleIndex, powerUps, usePowerUp, renderPowerUpModal]);
 
   // Enhanced splash screen rendering
   const renderSplash = useCallback(() => {
@@ -1063,7 +1538,6 @@ const GridZenGame = () => {
             resizeMode="contain"
             onError={() => {
               console.log('Splash image failed to load');
-              // Fallback to text
               setGameState('menu');
             }}
           />
@@ -1072,11 +1546,18 @@ const GridZenGame = () => {
     );
   }, [fadeAnim]);
 
+  // Show power-up modal when power-ups are available
+  useEffect(() => {
+    if (powerUps.length > 0 && !showPowerUpModal && gameState === 'playing') {
+      setShowPowerUpModal(true);
+    }
+  }, [powerUps, showPowerUpModal, gameState]);
+
   // Main render with initialization check
   if (!isInitialized) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading GridZen...</Text>
+        <Text style={styles.loadingText}>Loading GridZen 2...</Text>
       </View>
     );
   }
@@ -1088,7 +1569,7 @@ const GridZenGame = () => {
   return gameState === 'menu' ? renderMenu() : renderGame();
 };
 
-// Enhanced styles with modern design and gradient support
+// Enhanced styles with compact UI improvements
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1096,7 +1577,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
   },
-  gradientBackground: {
+  rainbowBackground: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -1139,53 +1620,48 @@ const styles = StyleSheet.create({
     width: screenWidth - 40,
     maxWidth: 300,
   },
+  // Streamlined Header
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingVertical: 5,
+  },
   title: {
-    fontSize: Math.min(32, screenWidth * 0.09),
+    fontSize: Math.min(28, screenWidth * 0.08),
     fontWeight: 'bold',
-    textAlign: 'center',
-    marginTop: 10,
-    marginBottom: 15,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
-  controls: {
-    marginBottom: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 15,
-    padding: 15,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  controlRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  headerButton: {
+    padding: 8,
+    borderRadius: 20,
+    minWidth: 40,
+    minHeight: 40,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 15,
-    paddingHorizontal: 10,
   },
-  controlLabel: {
-    fontSize: 16,
-    flex: 1,
+  headerButtonText: {
+    fontSize: 18,
   },
-  controlButton: {
-    padding: 12,
-    borderRadius: 12,
+  quickAccessContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+  },
+  quickAccessButton: {
+    padding: 8,
+    borderRadius: 20,
+    minWidth: 40,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 5,
+  },
+  quickAccessButtonText: {
+    fontSize: 18,
   },
   menuContent: {
     alignItems: 'center',
@@ -1231,17 +1707,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontWeight: '600',
   },
-  sizeButtons: {
+  // Compact Game Mode Buttons (25% smaller)
+  compactGameModeButtons: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    width: '100%',
     marginBottom: 20,
+    justifyContent: 'space-between',
   },
-  sizeButton: {
-    padding: 15,
-    margin: 5,
+  compactGameModeButton: {
+    flex: 1,
+    padding: 10, // Reduced from 15
     borderRadius: 12,
-    minWidth: Math.min(60, screenWidth * 0.15),
+    marginHorizontal: 5,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1251,10 +1728,46 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  sizeButtonText: {
-    fontSize: 16,
+  compactGameModeButtonText: {
+    fontSize: 14, // Reduced from 16
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  // Grid Size Selector (replaces multiple buttons)
+  gridSizeSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 15,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  gridSizeSelectorText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  gridSizeSelectorArrow: {
+    fontSize: 16,
+  },
+  gridSizeModal: {
+    width: '80%',
+    maxWidth: 300,
+    padding: 20,
+    borderRadius: 20,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
   },
   timeLimit: {
     fontSize: 16,
@@ -1282,7 +1795,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 15,
     paddingHorizontal: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 15,
@@ -1303,20 +1816,33 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
-  gridContainer: {
-    alignItems: 'center',
-    marginBottom: 30,
-    paddingVertical: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  puzzleTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 10,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  styledGridContainer: {
+    alignSelf: 'center',
+    padding: 15,
     borderRadius: 20,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: 6,
     },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  gridContainer: {
+    alignItems: 'center',
   },
   row: {
     flexDirection: 'row',
@@ -1338,9 +1864,31 @@ const styles = StyleSheet.create({
   tileText: {
     fontWeight: 'bold',
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+  },
+  powerUpsContainer: {
+    marginBottom: 20,
+  },
+  powerUpsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  powerUpChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginHorizontal: 5,
+  },
+  powerUpChipIcon: {
+    fontSize: 16,
+    marginRight: 5,
+  },
+  powerUpChipText: {
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   button: {
     padding: 15,
@@ -1383,7 +1931,95 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
+    marginBottom: 15,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  // Settings Modal Styles
+  settingsContainer: {
+    width: '100%',
+    marginBottom: 20,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+    paddingHorizontal: 10,
+  },
+  settingLabel: {
+    fontSize: 16,
+    flex: 1,
+  },
+  powerUpModal: {
+    width: '85%',
+    maxWidth: 350,
+    padding: 20,
+    borderRadius: 20,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+  },
+  powerUpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderRadius: 12,
     marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  powerUpIcon: {
+    fontSize: 24,
+    marginRight: 15,
+  },
+  powerUpInfo: {
+    flex: 1,
+  },
+  powerUpName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  powerUpDescription: {
+    fontSize: 14,
+    marginTop: 2,
+  },
+  puzzlePackContainer: {
+    maxHeight: 400,
+    marginBottom: 20,
+  },
+  puzzlePackSection: {
+    marginBottom: 20,
+  },
+  puzzlePackTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  puzzleItem: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  puzzleName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  puzzleDetails: {
+    fontSize: 14,
+    marginTop: 2,
   },
   resetButton: {
     padding: 10,
