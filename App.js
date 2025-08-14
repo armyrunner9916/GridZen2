@@ -29,35 +29,35 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// Pre-designed puzzle configurations
+// Pre-designed puzzle configurations - CYCLE-BASED puzzles requiring exact moves
 const PUZZLE_PACKS = {
   beginner: [
-    { name: "First Steps", gridSize: 4, maxMoves: 3, timeLimit: 45, 
-      startGrid: [2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16] },
-    { name: "Corner Twist", gridSize: 4, maxMoves: 5, timeLimit: 60,
-      startGrid: [1,2,3,4,5,6,7,8,13,10,11,12,9,14,15,16] },
-    { name: "Ring Around", gridSize: 4, maxMoves: 7, timeLimit: 75,
-      startGrid: [2,3,4,1,6,7,8,5,10,11,12,9,14,15,16,13] },
-    { name: "Cross Pattern", gridSize: 4, maxMoves: 9, timeLimit: 90,
-      startGrid: [1,6,3,4,5,2,7,8,9,10,15,12,13,14,11,16] },
-    { name: "Diagonal Shift", gridSize: 4, maxMoves: 11, timeLimit: 105,
-      startGrid: [5,2,3,4,1,10,7,8,9,6,15,12,13,14,11,16] }
+    { name: "First Steps", gridSize: 4, maxMoves: 1, timeLimit: 45, 
+      startGrid: [2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16] }, // 1↔2 = 1 move
+    { name: "Three Chain", gridSize: 4, maxMoves: 3, timeLimit: 60,
+      startGrid: [3,1,4,2,5,6,7,8,9,10,11,12,13,14,15,16] }, // Requires exactly 3 moves
+    { name: "Five Step", gridSize: 4, maxMoves: 5, timeLimit: 75,
+      startGrid: [7,1,2,3,5,6,8,4,9,10,11,12,13,14,15,16] }, // Six-tile cycle requiring exactly 5 moves
+    { name: "Seven Chain", gridSize: 4, maxMoves: 7, timeLimit: 90,
+      startGrid: [7,1,2,3,5,6,11,4,9,10,12,8,13,14,15,16] }, // Eight-tile cycle requiring exactly 7 moves
+    { name: "Nine Sequence", gridSize: 4, maxMoves: 9, timeLimit: 105,
+      startGrid: [4,2,3,8,1,6,7,12,5,10,11,16,9,13,14,15] } // Ten-tile cycle requiring exactly 9 moves
   ],
   intermediate: [
-    { name: "Pentagon", gridSize: 5, maxMoves: 12, timeLimit: 120,
-      startGrid: [2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25] },
-    { name: "Star Pattern", gridSize: 5, maxMoves: 15, timeLimit: 150,
-      startGrid: [1,2,8,4,5,6,7,3,9,10,11,12,18,14,15,16,17,13,19,20,21,22,23,24,25] },
-    { name: "Spiral", gridSize: 5, maxMoves: 18, timeLimit: 180,
-      startGrid: [2,3,4,5,1,7,8,9,10,6,12,13,14,15,11,17,18,19,20,16,22,23,24,25,21] }
+    { name: "Double Challenge", gridSize: 4, maxMoves: 6, timeLimit: 120,
+      startGrid: [2,1,4,3,5,6,7,8,9,10,11,12,13,14,15,16] }, // Two pairs = 2 moves total
+    { name: "Triple Test", gridSize: 4, maxMoves: 8, timeLimit: 150,
+      startGrid: [2,1,4,3,6,5,7,8,9,10,11,12,13,14,15,16] }, // Three pairs = 3 moves total  
+    { name: "Quad Master", gridSize: 4, maxMoves: 10, timeLimit: 180,
+      startGrid: [2,1,4,3,6,5,8,7,9,10,11,12,13,14,15,16] } // Four pairs = 4 moves total
   ],
   advanced: [
-    { name: "Hexagon", gridSize: 6, maxMoves: 20, timeLimit: 240,
-      startGrid: Array.from({length: 36}, (_, i) => i + 1).sort(() => Math.random() - 0.5) },
-    { name: "Double Helix", gridSize: 6, maxMoves: 25, timeLimit: 300,
-      startGrid: Array.from({length: 36}, (_, i) => i + 1).sort(() => Math.random() - 0.5) },
-    { name: "Master Challenge", gridSize: 6, maxMoves: 30, timeLimit: 360,
-      startGrid: Array.from({length: 36}, (_, i) => i + 1).sort(() => Math.random() - 0.5) }
+    { name: "Penta Challenge", gridSize: 4, maxMoves: 12, timeLimit: 200,
+      startGrid: [2,1,4,3,6,5,8,7,10,9,11,12,13,14,15,16] }, // Five pairs = 5 moves total
+    { name: "Hexa Master", gridSize: 4, maxMoves: 14, timeLimit: 250,
+      startGrid: [2,1,4,3,6,5,8,7,10,9,12,11,13,14,15,16] }, // Six pairs = 6 moves total
+    { name: "Ultimate Test", gridSize: 4, maxMoves: 16, timeLimit: 300,
+      startGrid: [2,1,4,3,6,5,8,7,10,9,12,11,14,13,16,15] } // Eight pairs = 8 moves total
   ]
 };
 
@@ -165,6 +165,18 @@ const GridZenGame = () => {
   const [currentPuzzleIndex, setCurrentPuzzleIndex] = useState(0);
   const [showPuzzleSelect, setShowPuzzleSelect] = useState(false);
   const [maxMoves, setMaxMoves] = useState(0);
+
+  // Puzzle pack unlocks & progress
+  const [unlocks, setUnlocks] = useState({
+    beginner: true,
+    intermediate: false,
+    advanced: false,
+    progress: { beginner: -1, intermediate: -1, advanced: -1 },
+  });
+  const saveUnlocks = useCallback(async (value) => {
+    setUnlocks(value);
+    try { await safeAsyncStorage.setItem('gridzen2_unlocks', JSON.stringify(value)); } catch {}
+  }, []);
   
   // Power-ups states
   const [powerUps, setPowerUps] = useState([]);
@@ -481,7 +493,9 @@ const GridZenGame = () => {
         safeAsyncStorage.getItem('gridzen2_soundOn')
       ]);
 
-      if (!isUnmountedRef.current) {
+      
+      const savedUnlocks = await safeAsyncStorage.getItem('gridzen2_unlocks');
+if (!isUnmountedRef.current) {
         if (savedScores) {
           try {
             setHighScores(JSON.parse(savedScores));
@@ -503,6 +517,14 @@ const GridZenGame = () => {
             setSoundEnabled(JSON.parse(savedSound));
           } catch (parseError) {
             console.log('Sound setting parse error:', parseError);
+          }
+        }
+
+        if (savedUnlocks) {
+          try {
+            setUnlocks(JSON.parse(savedUnlocks));
+          } catch (parseError) {
+            console.log('Unlocks parse error:', parseError);
           }
         }
 
@@ -731,6 +753,10 @@ const GridZenGame = () => {
   // Enhanced win condition check
   const checkWin = useCallback((currentGrid) => {
     try {
+      if (!currentGrid || !Array.isArray(currentGrid)) {
+        return false;
+      }
+      
       let expectedNumber = 1;
       for (let i = 0; i < gridSize; i++) {
         for (let j = 0; j < gridSize; j++) {
@@ -792,9 +818,27 @@ const GridZenGame = () => {
       saveHighScores(updatedScores);
       playSound('victory');
       
+      // Update puzzle pack progress & unlock next tier
+      if (gameMode === 'puzzle') {
+        const pack = currentPuzzlePack;
+        const idx = currentPuzzleIndex;
+        const packLen = PUZZLE_PACKS[pack]?.length ?? 0;
+
+        const nextUnlocks = JSON.parse(JSON.stringify(unlocks));
+        nextUnlocks.progress[pack] = Math.max(nextUnlocks.progress[pack], idx);
+
+        const finishedPack = idx >= packLen - 1;
+        if (finishedPack) {
+          if (pack === 'beginner') nextUnlocks.intermediate = true;
+          if (pack === 'intermediate') nextUnlocks.advanced = true;
+        }
+        await saveUnlocks(nextUnlocks);
+      }
+
       let message = `You won in ${moves} moves with ${timeLeft} seconds remaining!`;
       if (gameMode === 'puzzle') {
-        message = `Puzzle solved in ${moves}/${maxMoves} moves!`;
+        const currentPuzzle = PUZZLE_PACKS[currentPuzzlePack]?.[currentPuzzleIndex];
+        message = `Puzzle "${currentPuzzle?.name || 'Unknown'}" solved!`;
         if (currentPuzzleIndex < PUZZLE_PACKS[currentPuzzlePack].length - 1) {
           message += '\nNext puzzle unlocked!';
         }
@@ -887,8 +931,14 @@ const GridZenGame = () => {
           
           setSelectedTile(null);
           
-          if (checkWin(newGrid)) {
-            setTimeout(() => handleWin(), 300);
+          // Check for win condition
+          const isWin = checkWin(newGrid);
+          console.log('Win check result:', isWin, 'Game mode:', gameMode);
+          if (isWin) {
+            console.log('Victory detected! Showing dialog...');
+            setTimeout(() => {
+              handleWin();
+            }, 300);
           }
         } else {
           setSelectedTile({ row, col });
@@ -1072,26 +1122,27 @@ const GridZenGame = () => {
               <Picker
                 selectedValue={gridSize}
                 onValueChange={(value) => setGridSize(value)}
-                style={{ color: theme.inputText }}
+                style={{ color: isDarkMode ? '#ffffff' : theme.inputText }}
+                dropdownIconColor={isDarkMode ? '#ffffff' : '#000000'}
               >
-                <Picker.Item label="4x4 Grid" value={4} />
-                <Picker.Item label="5x5 Grid" value={5} />
-                <Picker.Item label="6x6 Grid" value={6} />
+                <Picker.Item label="4x4 Grid" value={4} color={isDarkMode ? '#ffffff' : '#000000'} />
+                <Picker.Item label="5x5 Grid" value={5} color={isDarkMode ? '#ffffff' : '#000000'} />
+                <Picker.Item label="6x6 Grid" value={6} color={isDarkMode ? '#ffffff' : '#000000'} />
               </Picker>
             </View>
             
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: theme.selectedTile, flex: 1, marginRight: 10 }]}
+                style={[styles.compactButton, { backgroundColor: theme.selectedTile, flex: 1, marginRight: 5 }]}
                 onPress={() => setShowGridSizeModal(false)}
               >
-                <Text style={[styles.buttonText, { color: '#ffffff' }]}>Confirm</Text>
+                <Text style={[styles.compactButtonText, { color: '#ffffff' }]}>Confirm</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: theme.button, flex: 1 }]}
+                style={[styles.compactButton, { backgroundColor: theme.button, flex: 1, marginLeft: 5 }]}
                 onPress={() => setShowGridSizeModal(false)}
               >
-                <Text style={[styles.buttonText, { color: theme.buttonText }]}>Cancel</Text>
+                <Text style={[styles.compactButtonText, { color: theme.buttonText }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1151,21 +1202,28 @@ const GridZenGame = () => {
         <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
           <View style={[styles.modalContent, { backgroundColor: theme.background }]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Select Puzzle Pack</Text>
+            <Text style={{marginTop:4, marginBottom:8, color: theme.text, opacity:0.75, fontSize:12}}>Beat all puzzles in a level to unlock the next pack.</Text>
             
             <ScrollView style={styles.puzzlePackContainer}>
               {Object.entries(PUZZLE_PACKS).map(([packName, puzzles]) => (
                 <View key={packName} style={styles.puzzlePackSection}>
                   <Text style={[styles.puzzlePackTitle, { color: theme.text }]}>
-                    {packName.charAt(0).toUpperCase() + packName.slice(1)}
+                    {packName.charAt(0).toUpperCase() + packName.slice(1)} {(packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced) ? '🔒' : ''}
                   </Text>
                   {puzzles.map((puzzle, index) => (
                     <TouchableOpacity
                       key={index}
+                      disabled={(packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)}
                       style={[
                         styles.puzzleItem,
                         { 
-                          backgroundColor: theme.button,
-                          opacity: currentPuzzlePack === packName && currentPuzzleIndex === index ? 0.7 : 1
+                          backgroundColor: ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced))
+                            ? '#555'
+                            : (currentPuzzlePack === packName && currentPuzzleIndex === index 
+                            ? theme.selectedTile 
+                            : theme.button),
+                          opacity: ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? 0.6 : 1,
+                          opacity: ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? 0.6 : 1,
                         }
                       ]}
                       onPress={() => {
@@ -1174,8 +1232,22 @@ const GridZenGame = () => {
                         setGridSize(puzzle.gridSize);
                       }}
                     >
-                      <Text style={[styles.puzzleName, { color: theme.buttonText }]}>{puzzle.name}</Text>
-                      <Text style={[styles.puzzleDetails, { color: theme.buttonText }]}>
+                      <Text style={[
+                        styles.puzzleName, 
+                        { 
+                          color: currentPuzzlePack === packName && currentPuzzleIndex === index 
+                            ? '#ffffff' 
+                            : ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? '#ccc' : ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? '#ccc' : theme.buttonText 
+                        }
+                      ]}> {((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? `🔒 ${puzzle.name}` : puzzle.name}</Text>
+                      <Text style={[
+                        styles.puzzleDetails, 
+                        { 
+                          color: currentPuzzlePack === packName && currentPuzzleIndex === index 
+                            ? '#ffffff' 
+                            : ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? '#ccc' : ((packName==='intermediate' && !unlocks.intermediate) || (packName==='advanced' && !unlocks.advanced)) ? '#ccc' : theme.buttonText 
+                        }
+                      ]}>
                         {puzzle.gridSize}x{puzzle.gridSize} • Max {puzzle.maxMoves} moves • {puzzle.timeLimit}s
                       </Text>
                     </TouchableOpacity>
@@ -1205,7 +1277,7 @@ const GridZenGame = () => {
         </View>
       </Modal>
     );
-  }, [showPuzzleSelect, theme, currentPuzzlePack, currentPuzzleIndex, startGame]);
+  }, [showPuzzleSelect, theme, currentPuzzlePack, currentPuzzleIndex, startGame, unlocks]);
 
   // Enhanced high scores modal rendering
   const renderHighScoresModal = useCallback(() => {
@@ -1234,7 +1306,8 @@ const GridZenGame = () => {
                 <Picker
                   selectedValue={selectedDifficulty}
                   onValueChange={setSelectedDifficulty}
-                  style={{ color: theme.inputText }}
+                  style={{ color: isDarkMode ? '#ffffff' : theme.inputText }}
+                dropdownIconColor={isDarkMode ? '#ffffff' : '#000000'}
                 >
                   <Picker.Item label="Classic 4x4" value="4x4" />
                   <Picker.Item label="Classic 5x5" value="5x5" />
@@ -1443,7 +1516,7 @@ const GridZenGame = () => {
 
             {puzzle && (
               <Text style={[styles.puzzleTitle, { color: theme.text }]}>
-                {puzzle.name} ({currentPuzzlePack})
+                {puzzle.name}
               </Text>
             )}
 
@@ -1759,10 +1832,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   gridSizeModal: {
-    width: '80%',
-    maxWidth: 300,
-    padding: 20,
-    borderRadius: 20,
+    width: '60%',
+    maxWidth: 220,
+    padding: 12,
+    borderRadius: 15,
     elevation: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -1936,7 +2009,27 @@ const styles = StyleSheet.create({
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 15,
+    gap: 10,
+  },
+  compactButton: {
+    padding: 10,
+    borderRadius: 10,
+    alignSelf: 'center',
+    minWidth: 80,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  compactButtonText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
   // Settings Modal Styles
   settingsContainer: {
