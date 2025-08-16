@@ -1,7 +1,6 @@
 {
   "name": "gridzen2",
-  "license": "0BSD",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
@@ -10,24 +9,25 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "2.1.2",
-    "@react-native-picker/picker": "2.11.1",
-    "expo": "~53.0.20",
-    "expo-asset": "~11.1.5",
-    "expo-audio": "~0.4.6",
-    "expo-av": "^15.1.7",
-    "expo-constants": "~17.1.6",
-    "expo-linear-gradient": "~14.1.5",
-    "expo-splash-screen": "~0.30.10",
-    "expo-status-bar": "~2.2.3",
-    "expo-system-ui": "~5.0.10",
-    "react": "19.0.0",
-    "react-native": "0.79.5",
-    "react-native-confetti-cannon": "^1.5.2",
-    "react-native-google-mobile-ads": "^14.2.5"
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-native-picker/picker": "2.7.5",
+    "expo": "~53.0.0",
+    "expo-audio": "0.4.8",
+    "expo-haptics": "~13.0.1",
+    "expo-linear-gradient": "~13.0.2",
+    "expo-system-ui": "~3.0.7",
+    "react": "^19.0.0",
+    "react-native": "0.79.3",
+    "react-native-confetti-cannon": "1.5.2",
+    "react-native-gesture-handler": "~2.20.2",
+    "react-native-google-mobile-ads": "^14.2.3",
+    "react-native-reanimated": "~3.16.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
+  },
+  "overrides": {
+    "react": "^19.0.0"
   },
   "private": true
 }
