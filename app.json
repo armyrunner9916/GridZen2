@@ -50,9 +50,7 @@
       "favicon": "./assets/images/playstore.png"
     },
     "plugins": [
-      "expo-audio",
       "expo-system-ui",
-      "expo-haptics",
       "expo-linear-gradient",
       [
         "react-native-google-mobile-ads",
