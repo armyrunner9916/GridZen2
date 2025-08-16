@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
-      "buildNumber": "4",
+      "buildNumber": "1",
       "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -33,7 +33,7 @@
     },
     "android": {
       "package": "com.steveomatic.gridzen2",
-      "versionCode": 3,
+      "versionCode": 1,
       "edgeToEdgeEnabled": true,
       "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292",
       "adaptiveIcon": {
@@ -51,7 +51,6 @@
     },
     "plugins": [
       "expo-system-ui",
-      "expo-linear-gradient",
       [
         "react-native-google-mobile-ads",
         {
