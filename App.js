@@ -11,13 +11,17 @@ import {
   Platform,
   Animated,
   SafeAreaView,
-  StatusBar
+  StatusBar,
+  Image,
+  PanGestureHandler,
+  State
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+// import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads'; // Commented for Expo Go
 import ConfettiCannon from 'react-native-confetti-cannon';
 import * as Haptics from 'expo-haptics';
+import { PanGestureHandler as RNGHPanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -28,7 +32,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const INITIAL_STATE = {
   // Core game state
   gamePhase: 'splash', // splash, menu, playing, paused, won, gameOver
-  gameMode: 'classic', // classic, puzzle
+  gameMode: 'classic', // classic, color, pattern
   gridData: [], // Flat array instead of 2D
   gridSize: 4,
   selectedTileIndex: null,
@@ -46,38 +50,39 @@ const INITIAL_STATE = {
   activePowerUp: null,
   powerUpQueue: [],
   
-  // Puzzle mode
-  currentPuzzlePack: 'beginner',
-  currentPuzzleIndex: 0,
-  maxMovesAllowed: 0,
-  puzzleProgress: {
-    beginner: { unlocked: true, completed: [] },
-    intermediate: { unlocked: false, completed: [] },
-    advanced: { unlocked: false, completed: [] }
-  },
+  // Game mode specific data
+  colorTargets: [], // For color match mode
+  patternTargets: [], // For pattern match mode
   
   // Player data
   playerProfile: {
-    name: '',
     totalGamesPlayed: 0,
     totalRowsCompleted: 0,
     favoriteGridSize: 4
   },
   
+  // Platform integration
+  gameServices: {
+    isSignedIn: false,
+    playerName: null,
+    playerId: null
+  },
+  
   // Settings & UI
   isDarkTheme: false,
-  soundsEnabled: false, // Placeholder for future audio implementation
+  soundsEnabled: false,
   gesturesEnabled: true,
   animationsEnabled: true,
   
   // High scores with new structure
   leaderboards: {
     classic: { '4x4': [], '5x5': [], '6x6': [] },
-    puzzle: { beginner: [], intermediate: [], advanced: [] }
+    color: { '4x4': [], '5x5': [], '6x6': [] },
+    pattern: { '4x4': [], '5x5': [], '6x6': [] }
   },
   
   // UI state
-  visiblePanel: null, // settings, scores, puzzles, powerups
+  visiblePanel: null, // settings, scores, powerups
   isInitialized: false
 };
 
@@ -85,6 +90,7 @@ const GAME_ACTIONS = {
   // Game flow
   INITIALIZE_GAME: 'INITIALIZE_GAME',
   SET_GAME_PHASE: 'SET_GAME_PHASE',
+  SET_GAME_MODE: 'SET_GAME_MODE',
   START_NEW_GAME: 'START_NEW_GAME',
   RESET_GAME: 'RESET_GAME',
   
@@ -113,6 +119,11 @@ const GAME_ACTIONS = {
   TOGGLE_THEME: 'TOGGLE_THEME',
   TOGGLE_SOUNDS: 'TOGGLE_SOUNDS',
   UPDATE_PLAYER_PROFILE: 'UPDATE_PLAYER_PROFILE',
+  
+  // Game Services
+  SET_GAME_SERVICES_STATUS: 'SET_GAME_SERVICES_STATUS',
+  SIGN_IN_GAME_SERVICES: 'SIGN_IN_GAME_SERVICES',
+  SIGN_OUT_GAME_SERVICES: 'SIGN_OUT_GAME_SERVICES',
   
   // UI
   SHOW_PANEL: 'SHOW_PANEL',
@@ -162,11 +173,33 @@ const POWER_UP_CONFIG = {
   }
 };
 
+// Game mode configurations
+const GAME_MODE_CONFIG = {
+  classic: {
+    emoji: '🎯',
+    name: 'NUMBERS',
+    description: 'Arrange tiles in numerical order from 1 to 16 (or 25/36). Each row must be sequential.'
+  },
+  color: {
+    emoji: '🎨',
+    name: 'COLOR',
+    description: 'Match all tiles in each row to the same color. Each row needs identical colors.'
+  },
+  pattern: {
+    emoji: '🔄',
+    name: 'PATTERN',
+    description: 'Arrange each row to contain one of each pattern symbol. All patterns must appear once per row.'
+  }
+};
+
 // Game state reducer
 function gameStateReducer(state, action) {
   switch (action.type) {
     case GAME_ACTIONS.SET_GAME_PHASE:
       return { ...state, gamePhase: action.payload };
+      
+    case GAME_ACTIONS.SET_GAME_MODE:
+      return { ...state, gameMode: action.payload };
       
     case GAME_ACTIONS.SET_GRID_SIZE:
       return { ...state, gridSize: action.payload };
@@ -220,7 +253,34 @@ function gameStateReducer(state, action) {
     case GAME_ACTIONS.TOGGLE_THEME:
       return { ...state, isDarkTheme: !state.isDarkTheme };
       
-    case GAME_ACTIONS.SHOW_PANEL:
+    case GAME_ACTIONS.UPDATE_PLAYER_PROFILE:
+      return { ...state, playerProfile: { ...state.playerProfile, ...action.payload } };
+      
+    case GAME_ACTIONS.SET_GAME_SERVICES_STATUS:
+      return { ...state, gameServices: { ...state.gameServices, ...action.payload } };
+      
+    case GAME_ACTIONS.SIGN_IN_GAME_SERVICES:
+      return { 
+        ...state, 
+        gameServices: { 
+          ...state.gameServices, 
+          isSignedIn: true, 
+          ...action.payload 
+        } 
+      };
+      
+    case GAME_ACTIONS.SIGN_OUT_GAME_SERVICES:
+      return { 
+        ...state, 
+        gameServices: { 
+          isSignedIn: false, 
+          playerName: null, 
+          playerId: null 
+        } 
+      };
+      
+    case GAME_ACTIONS.TOGGLE_SOUNDS:
+      return { ...state, soundsEnabled: !state.soundsEnabled };
       return { ...state, visiblePanel: action.payload };
       
     case GAME_ACTIONS.HIDE_PANEL:
@@ -273,54 +333,162 @@ export const useGameState = () => {
 // ============================================================================
 
 const generateTileColors = (count) => {
-  const colors = [];
-  const hueStep = 360 / count;
+  // Vibrant, saturated colors for better visual appeal
+  const vibrantColors = [
+    '#FF3B30', // Bright Red
+    '#007AFF', // Bright Blue  
+    '#34C759', // Bright Green
+    '#FF9500', // Bright Orange
+    '#AF52DE', // Bright Purple
+    '#FF2D92', // Bright Pink
+    '#5AC8FA', // Bright Cyan
+    '#FFCC02', // Bright Yellow
+    '#FF6B35', // Bright Red-Orange
+    '#4ECDC4', // Bright Teal
+    '#45B7D1', // Bright Sky Blue
+    '#96CEB4', // Bright Mint
+    '#FFEAA7', // Bright Light Yellow
+    '#DDA0DD', // Bright Plum
+    '#98D8C8', // Bright Seafoam
+    '#F7DC6F'  // Bright Gold
+  ];
   
-  for (let i = 0; i < count; i++) {
-    const hue = (i * hueStep + Math.random() * 20) % 360;
-    const saturation = 65 + Math.random() * 25;
-    const lightness = 50 + Math.random() * 15;
-    colors.push(`hsl(${Math.round(hue)}, ${Math.round(saturation)}%, ${Math.round(lightness)}%)`);
-  }
-  
-  return colors.sort(() => Math.random() - 0.5);
+  return vibrantColors.slice(0, count);
 };
 
-const createGridData = (size, isShuffled = true) => {
+const generatePatterns = (gridSize) => {
+  const allPatterns = [
+    { symbol: '●●●', name: 'dots', color: '#FF3B30' },      // Bright Red
+    { symbol: '|||', name: 'stripes', color: '#007AFF' },   // Bright Blue
+    { symbol: '~~~', name: 'waves', color: '#34C759' },     // Bright Green
+    { symbol: '▓▓▓', name: 'grid', color: '#FF9500' },      // Bright Orange
+    { symbol: '◆◇◆', name: 'diamond', color: '#AF52DE' },   // Bright Purple
+    { symbol: '✕✕✕', name: 'cross', color: '#FF2D92' },     // Bright Pink
+    { symbol: '▲▼▲', name: 'triangle', color: '#5AC8FA' },  // Bright Cyan
+    { symbol: '◐◑◐', name: 'circle', color: '#FFCC02' }     // Bright Yellow
+  ];
+  
+  return allPatterns.slice(0, gridSize);
+};
+
+const createGridData = (size, gameMode, isShuffled = true) => {
   const totalTiles = size * size;
-  const colors = generateTileColors(totalTiles);
-  const numbers = Array.from({ length: totalTiles }, (_, i) => i + 1);
   
-  if (isShuffled) {
-    // Fisher-Yates shuffle
-    for (let i = numbers.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
+  if (gameMode === 'classic') {
+    const colors = generateTileColors(totalTiles);
+    const numbers = Array.from({ length: totalTiles }, (_, i) => i + 1);
+    
+    if (isShuffled) {
+      for (let i = numbers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
+      }
     }
+    
+    return numbers.map((number, index) => ({
+      id: `tile-${index}`,
+      number,
+      color: colors[number - 1],
+      originalIndex: number - 1,
+      currentIndex: index,
+      gameMode: 'classic'
+    }));
+  } else if (gameMode === 'color') {
+    const colors = generateTileColors(size); // One color per row
+    const tiles = [];
+    
+    for (let i = 0; i < totalTiles; i++) {
+      const rowIndex = Math.floor(i / size);
+      tiles.push({
+        id: `tile-${i}`,
+        color: colors[rowIndex],
+        targetColor: colors[rowIndex],
+        currentIndex: i,
+        gameMode: 'color'
+      });
+    }
+    
+    if (isShuffled) {
+      for (let i = tiles.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+        tiles[i].currentIndex = i;
+        tiles[j].currentIndex = j;
+      }
+    }
+    
+    return tiles;
+  } else if (gameMode === 'pattern') {
+    const patterns = generatePatterns(size);
+    const tiles = [];
+    
+    // Create tiles where each row contains one of each pattern
+    for (let row = 0; row < size; row++) {
+      for (let col = 0; col < size; col++) {
+        const patternIndex = col; // Each column gets a different pattern
+        const tileIndex = row * size + col;
+        tiles.push({
+          id: `tile-${tileIndex}`,
+          pattern: patterns[patternIndex],
+          currentIndex: tileIndex,
+          targetRow: row,
+          targetCol: col,
+          gameMode: 'pattern'
+        });
+      }
+    }
+    
+    if (isShuffled) {
+      // Shuffle the tiles while keeping track of their target positions
+      for (let i = tiles.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+        tiles[i].currentIndex = i;
+        tiles[j].currentIndex = j;
+      }
+    }
+    
+    return tiles;
   }
-  
-  return numbers.map((number, index) => ({
-    id: `tile-${index}`,
-    number,
-    color: colors[number - 1],
-    originalIndex: number - 1,
-    currentIndex: index
-  }));
 };
 
-const checkRowCompletion = (gridData, gridSize, rowIndex) => {
+const checkRowCompletion = (gridData, gridSize, rowIndex, gameMode) => {
   const startIndex = rowIndex * gridSize;
   const endIndex = startIndex + gridSize;
   const rowTiles = gridData.slice(startIndex, endIndex);
   
-  return rowTiles.every((tile, colIndex) => {
-    const expectedNumber = startIndex + colIndex + 1;
-    return tile.number === expectedNumber;
-  });
+  if (gameMode === 'classic') {
+    return rowTiles.every((tile, colIndex) => {
+      const expectedNumber = startIndex + colIndex + 1;
+      return tile.number === expectedNumber;
+    });
+  } else if (gameMode === 'color') {
+    const targetColor = rowTiles[0].targetColor;
+    return rowTiles.every(tile => tile.color === targetColor);
+  } else if (gameMode === 'pattern') {
+    // Check that each row has one of each pattern (all different patterns)
+    const patterns = generatePatterns(gridSize);
+    const patternNames = patterns.map(p => p.name);
+    
+    const rowPatterns = rowTiles.map(tile => tile.pattern.name);
+    const hasAllPatterns = patternNames.every(patternName => 
+      rowPatterns.includes(patternName)
+    );
+    const hasUniquePatterns = new Set(rowPatterns).size === rowPatterns.length;
+    
+    return hasAllPatterns && hasUniquePatterns;
+  }
+  
+  return false;
 };
 
-const checkWinCondition = (gridData, gridSize) => {
-  return gridData.every((tile, index) => tile.number === index + 1);
+const checkWinCondition = (gridData, gridSize, gameMode) => {
+  for (let row = 0; row < gridSize; row++) {
+    if (!checkRowCompletion(gridData, gridSize, row, gameMode)) {
+      return false;
+    }
+  }
+  return true;
 };
 
 // ============================================================================
@@ -353,9 +521,9 @@ const usePersistence = (gameState, dispatch) => {
       const dataToSave = {
         playerProfile: gameState.playerProfile,
         leaderboards: gameState.leaderboards,
-        puzzleProgress: gameState.puzzleProgress,
         isDarkTheme: gameState.isDarkTheme,
-        soundsEnabled: gameState.soundsEnabled
+        soundsEnabled: gameState.soundsEnabled,
+        gameMode: gameState.gameMode
       };
       
       await AsyncStorage.setItem('gridzen2_v2_data', JSON.stringify(dataToSave));
@@ -387,12 +555,83 @@ const usePersistence = (gameState, dispatch) => {
     if (gameState.isInitialized) {
       saveData();
     }
-  }, [gameState.playerProfile, gameState.leaderboards, saveData, gameState.isInitialized]);
+  }, [gameState.playerProfile, gameState.leaderboards, gameState.gameMode, gameState.gameServices, saveData, gameState.isInitialized]);
   
   return { saveData, loadData };
 };
 
 const useHapticFeedback = () => {
+const useGameServices = (dispatch) => {
+  const checkGameServicesStatus = useCallback(async () => {
+    try {
+      // Placeholder for Game Center/Google Play Games authentication check
+      // This would integrate with actual Game Center or Play Games SDK
+      
+      if (Platform.OS === 'ios') {
+        // iOS Game Center integration would go here
+        // For now, simulate checking authentication status
+        console.log('Checking Game Center authentication...');
+        dispatch({ 
+          type: GAME_ACTIONS.SET_GAME_SERVICES_STATUS, 
+          payload: { 
+            isSignedIn: false, 
+            playerName: null,
+            playerId: null 
+          } 
+        });
+      } else {
+        // Android Google Play Games integration would go here
+        console.log('Checking Google Play Games authentication...');
+        dispatch({ 
+          type: GAME_ACTIONS.SET_GAME_SERVICES_STATUS, 
+          payload: { 
+            isSignedIn: false, 
+            playerName: null,
+            playerId: null 
+          } 
+        });
+      }
+    } catch (error) {
+      console.log('Game services check error:', error);
+    }
+  }, [dispatch]);
+  
+  const signInToGameServices = useCallback(async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        // Game Center sign-in would go here
+        console.log('Attempting Game Center sign-in...');
+        // Simulate successful sign-in for now
+        dispatch({ 
+          type: GAME_ACTIONS.SIGN_IN_GAME_SERVICES, 
+          payload: { 
+            playerName: 'Game Center Player',
+            playerId: 'gc_player_123' 
+          } 
+        });
+      } else {
+        // Google Play Games sign-in would go here
+        console.log('Attempting Google Play Games sign-in...');
+        // Simulate successful sign-in for now
+        dispatch({ 
+          type: GAME_ACTIONS.SIGN_IN_GAME_SERVICES, 
+          payload: { 
+            playerName: 'Play Games Player',
+            playerId: 'pg_player_123' 
+          } 
+        });
+      }
+    } catch (error) {
+      console.log('Game services sign-in error:', error);
+    }
+  }, [dispatch]);
+  
+  useEffect(() => {
+    checkGameServicesStatus();
+  }, [checkGameServicesStatus]);
+  
+  return { checkGameServicesStatus, signInToGameServices };
+};
   const triggerHaptic = useCallback((type = 'light') => {
     try {
       switch (type) {
@@ -420,15 +659,123 @@ const useHapticFeedback = () => {
   return triggerHaptic;
 };
 
+// Game Services Hook (placeholder for future Game Center/Play Games integration)
+const useGameServices = (dispatch) => {
+  const checkGameServicesStatus = useCallback(async () => {
+    try {
+      // Placeholder for Game Center/Google Play Games authentication check
+      // This would integrate with actual Game Center or Play Games SDK
+      
+      if (Platform.OS === 'ios') {
+        // iOS Game Center integration would go here
+        // For now, simulate checking authentication status
+        console.log('Checking Game Center authentication...');
+        dispatch({ 
+          type: GAME_ACTIONS.SET_GAME_SERVICES_STATUS, 
+          payload: { 
+            isSignedIn: false, 
+            playerName: null,
+            playerId: null 
+          } 
+        });
+      } else {
+        // Android Google Play Games integration would go here
+        console.log('Checking Google Play Games authentication...');
+        dispatch({ 
+          type: GAME_ACTIONS.SET_GAME_SERVICES_STATUS, 
+          payload: { 
+            isSignedIn: false, 
+            playerName: null,
+            playerId: null 
+          } 
+        });
+      }
+    } catch (error) {
+      console.log('Game services check error:', error);
+    }
+  }, [dispatch]);
+  
+  const signInToGameServices = useCallback(async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        // Game Center sign-in would go here
+        console.log('Attempting Game Center sign-in...');
+        // Simulate successful sign-in for now
+        dispatch({ 
+          type: GAME_ACTIONS.SIGN_IN_GAME_SERVICES, 
+          payload: { 
+            playerName: 'Game Center Player',
+            playerId: 'gc_player_123' 
+          } 
+        });
+      } else {
+        // Google Play Games sign-in would go here
+        console.log('Attempting Google Play Games sign-in...');
+        // Simulate successful sign-in for now
+        dispatch({ 
+          type: GAME_ACTIONS.SIGN_IN_GAME_SERVICES, 
+          payload: { 
+            playerName: 'Play Games Player',
+            playerId: 'pg_player_123' 
+          } 
+        });
+      }
+    } catch (error) {
+      console.log('Game services sign-in error:', error);
+    }
+  }, [dispatch]);
+  
+  useEffect(() => {
+    checkGameServicesStatus();
+  }, [checkGameServicesStatus]);
+  
+  return { checkGameServicesStatus, signInToGameServices };
+};
+
 // ============================================================================
 // COMPONENTS
 // ============================================================================
 
-// 3D Textured Tile Component
+// 3D Textured Tile Component with dynamic sizing
+const GameServicesStatus = ({ gameState, dispatch }) => {
+  const { signInToGameServices } = useGameServices(dispatch);
+  
+  if (gameState.gameServices.isSignedIn) {
+    return (
+      <View style={styles.gameServicesContainer}>
+        <Text style={[styles.welcomeText, { color: gameState.isDarkTheme ? '#4CAF50' : '#2E7D32' }]}>
+          Welcome, {gameState.gameServices.playerName}!
+        </Text>
+        <Text style={[styles.gameServicesSubtext, { color: gameState.isDarkTheme ? '#cccccc' : '#666666' }]}>
+          {Platform.OS === 'ios' ? 'Game Center Connected' : 'Google Play Games Connected'}
+        </Text>
+      </View>
+    );
+  }
+  
+  return (
+    <View style={styles.gameServicesContainer}>
+      <TouchableOpacity 
+        style={[styles.signInButton, { backgroundColor: gameState.isDarkTheme ? '#333333' : '#f0f0f0' }]}
+        onPress={signInToGameServices}
+      >
+        <Text style={[styles.signInButtonText, { color: gameState.isDarkTheme ? '#4CAF50' : '#2E7D32' }]}>
+          {Platform.OS === 'ios' ? '🎮 Sign in to Game Center' : '🎮 Sign in to Play Games'}
+        </Text>
+        <Text style={[styles.signInSubtext, { color: gameState.isDarkTheme ? '#cccccc' : '#666666' }]}>
+          For leaderboards & achievements
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 const GameTile = React.memo(({ tile, index, gridSize, isSelected, isLocked, isCompleted, onPress, gameState }) => {
   const triggerHaptic = useHapticFeedback();
   const scale = useRef(new Animated.Value(1)).current;
-  const tileSize = Math.max(60, (SCREEN_WIDTH - 80) / gridSize - 8);
+  
+  // Dynamic tile sizing - 80% of screen width with 10% padding each side
+  const gridWidth = SCREEN_WIDTH * 0.8;
+  const tileSize = (gridWidth / gridSize) - 8; // 8px for margins
   
   const handlePress = useCallback(() => {
     if (isLocked) return;
@@ -443,12 +790,69 @@ const GameTile = React.memo(({ tile, index, gridSize, isSelected, isLocked, isCo
     onPress(index);
   }, [index, isLocked, onPress, triggerHaptic, scale]);
   
-  // 3D Gradient effect
-  const gradientColors = isCompleted 
-    ? ['#4169E1', '#1E90FF', '#87CEEB'] // Royal blue gradient for completed rows
-    : isSelected
-    ? ['#32CD32', '#228B22', '#006400'] // Green gradient for selected
-    : [`${tile.color}`, `${tile.color}dd`, `${tile.color}bb`]; // Original color gradient
+  // 3D Gradient effect with more vibrant colors for color/pattern modes
+  let gradientColors;
+  
+  if (isCompleted) {
+    gradientColors = ['#4169E1', '#1E90FF', '#87CEEB']; // Royal blue gradient for completed rows
+  } else if (isSelected) {
+    gradientColors = ['#32CD32', '#228B22', '#006400']; // Green gradient for selected
+  } else if (gameState.gameMode === 'color') {
+    // Use the vibrant color directly for color mode
+    const baseColor = tile.color;
+    gradientColors = [baseColor, `${baseColor}dd`, `${baseColor}bb`];
+  } else if (gameState.gameMode === 'pattern') {
+    // Use the vibrant pattern color for pattern mode
+    const baseColor = tile.pattern.color;
+    gradientColors = [baseColor, `${baseColor}dd`, `${baseColor}bb`];
+  } else {
+    // Classic mode - use the generated tile color
+    gradientColors = [`${tile.color}`, `${tile.color}dd`, `${tile.color}bb`];
+  }
+  
+  const renderTileContent = () => {
+    if (gameState.gameMode === 'classic') {
+      return (
+        <Text style={[
+          styles.tileNumber,
+          {
+            fontSize: Math.min(28, tileSize / 2.5),
+            color: isCompleted || isSelected ? '#ffffff' : '#000000',
+            textShadowColor: isCompleted || isSelected ? '#000000' : '#ffffff',
+            textShadowOffset: { width: 1, height: 1 },
+            textShadowRadius: 2
+          }
+        ]}>
+          {tile.number}
+        </Text>
+      );
+    } else if (gameState.gameMode === 'color') {
+      return (
+        <View style={[styles.colorIndicator, { 
+          backgroundColor: tile.color,
+          borderColor: '#ffffff',
+          shadowColor: tile.color,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.5,
+          shadowRadius: 4,
+          elevation: 6
+        }]} />
+      );
+    } else if (gameState.gameMode === 'pattern') {
+      return (
+        <View style={styles.patternContainer}>
+          <Text style={[styles.patternSymbol, { 
+            color: tile.pattern.color,
+            textShadowColor: '#000000',
+            textShadowOffset: { width: 2, height: 2 },
+            textShadowRadius: 3
+          }]}>
+            {tile.pattern.symbol}
+          </Text>
+        </View>
+      );
+    }
+  };
   
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -479,18 +883,7 @@ const GameTile = React.memo(({ tile, index, gridSize, isSelected, isLocked, isCo
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
-          <Text style={[
-            styles.tileNumber,
-            {
-              fontSize: Math.min(24, tileSize / 2.5),
-              color: isCompleted || isSelected ? '#ffffff' : '#000000',
-              textShadowColor: isCompleted || isSelected ? '#000000' : '#ffffff',
-              textShadowOffset: { width: 1, height: 1 },
-              textShadowRadius: 2
-            }
-          ]}>
-            {tile.number}
-          </Text>
+          {renderTileContent()}
           
           {isLocked && (
             <View style={styles.lockIcon}>
@@ -503,7 +896,7 @@ const GameTile = React.memo(({ tile, index, gridSize, isSelected, isLocked, isCo
   );
 });
 
-// FlatList-based Grid Component
+// FlatList-based Grid Component with swipe support
 const GameGrid = ({ gameState, dispatch }) => {
   const triggerHaptic = useHapticFeedback();
   
@@ -529,51 +922,94 @@ const GameGrid = ({ gameState, dispatch }) => {
         (Math.abs(selectedCol - targetCol) === 1 && selectedRow === targetRow);
       
       if (isAdjacent) {
-        triggerHaptic('medium');
-        
-        // Perform swap
-        dispatch({
-          type: GAME_ACTIONS.SWAP_TILES,
-          payload: { fromIndex: gameState.selectedTileIndex, toIndex: tileIndex }
-        });
-        
-        dispatch({ type: GAME_ACTIONS.INCREMENT_MOVES });
-        
-        // Check for row completion after swap
-        setTimeout(() => {
-          const newGrid = [...gameState.gridData];
-          [newGrid[gameState.selectedTileIndex], newGrid[tileIndex]] = 
-            [newGrid[tileIndex], newGrid[gameState.selectedTileIndex]];
-          
-          // Check each row for completion
-          for (let row = 0; row < gameState.gridSize; row++) {
-            if (!gameState.completedRows.has(row) && checkRowCompletion(newGrid, gameState.gridSize, row)) {
-              triggerHaptic('success');
-              dispatch({ type: GAME_ACTIONS.COMPLETE_ROW, payload: { rowIndex: row } });
-              
-              // Award power-up for row completion
-              const powerUpTypes = Object.keys(POWER_UP_CONFIG);
-              const randomType = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
-              const powerUp = {
-                id: Date.now(),
-                type: randomType,
-                ...POWER_UP_CONFIG[randomType]
-              };
-              
-              dispatch({ type: GAME_ACTIONS.ADD_POWER_UP, payload: powerUp });
-            }
-          }
-          
-          // Check win condition
-          if (checkWinCondition(newGrid, gameState.gridSize)) {
-            triggerHaptic('success');
-            dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'won' });
-          }
-        }, 100);
+        performSwap(gameState.selectedTileIndex, tileIndex);
       } else {
         dispatch({ type: GAME_ACTIONS.SELECT_TILE, payload: tileIndex });
       }
     }
+  }, [gameState, dispatch]);
+  
+  const handleTileSwipe = useCallback((tileIndex, direction) => {
+    if (!gameState.isGameActive) return;
+    
+    const isLocked = gameState.lockedTiles.has(tileIndex);
+    if (isLocked) return;
+    
+    // Calculate target position based on swipe direction
+    const currentRow = Math.floor(tileIndex / gameState.gridSize);
+    const currentCol = tileIndex % gameState.gridSize;
+    
+    let targetRow = currentRow;
+    let targetCol = currentCol;
+    
+    switch (direction) {
+      case 'up':
+        targetRow = Math.max(0, currentRow - 1);
+        break;
+      case 'down':
+        targetRow = Math.min(gameState.gridSize - 1, currentRow + 1);
+        break;
+      case 'left':
+        targetCol = Math.max(0, currentCol - 1);
+        break;
+      case 'right':
+        targetCol = Math.min(gameState.gridSize - 1, currentCol + 1);
+        break;
+    }
+    
+    const targetIndex = targetRow * gameState.gridSize + targetCol;
+    
+    // Only swap if position actually changed
+    if (targetIndex !== tileIndex) {
+      performSwap(tileIndex, targetIndex);
+    }
+  }, [gameState, dispatch]);
+  
+  const performSwap = useCallback((fromIndex, toIndex) => {
+    triggerHaptic('medium');
+    
+    // Perform swap
+    dispatch({
+      type: GAME_ACTIONS.SWAP_TILES,
+      payload: { fromIndex, toIndex }
+    });
+    
+    dispatch({ type: GAME_ACTIONS.INCREMENT_MOVES });
+    
+    // Check for row completion after swap
+    setTimeout(() => {
+      const newGrid = [...gameState.gridData];
+      [newGrid[fromIndex], newGrid[toIndex]] = [newGrid[toIndex], newGrid[fromIndex]];
+      
+      // Update current indices
+      newGrid[fromIndex].currentIndex = fromIndex;
+      newGrid[toIndex].currentIndex = toIndex;
+      
+      // Check each row for completion
+      for (let row = 0; row < gameState.gridSize; row++) {
+        if (!gameState.completedRows.has(row) && checkRowCompletion(newGrid, gameState.gridSize, row, gameState.gameMode)) {
+          triggerHaptic('success');
+          dispatch({ type: GAME_ACTIONS.COMPLETE_ROW, payload: { rowIndex: row } });
+          
+          // Award power-up for row completion
+          const powerUpTypes = Object.keys(POWER_UP_CONFIG);
+          const randomType = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
+          const powerUp = {
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: randomType,
+            ...POWER_UP_CONFIG[randomType]
+          };
+          
+          dispatch({ type: GAME_ACTIONS.ADD_POWER_UP, payload: powerUp });
+        }
+      }
+      
+      // Check win condition
+      if (checkWinCondition(newGrid, gameState.gridSize, gameState.gameMode)) {
+        triggerHaptic('success');
+        dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'won' });
+      }
+    }, 100);
   }, [gameState, dispatch, triggerHaptic]);
   
   const renderTile = useCallback(({ item, index }) => {
@@ -591,10 +1027,11 @@ const GameGrid = ({ gameState, dispatch }) => {
         isLocked={isLocked}
         isCompleted={isCompleted}
         onPress={handleTilePress}
+        onSwipe={handleTileSwipe}
         gameState={gameState}
       />
     );
-  }, [gameState, handleTilePress]);
+  }, [gameState, handleTilePress, handleTileSwipe]);
   
   return (
     <View style={styles.gridContainer}>
@@ -602,7 +1039,7 @@ const GameGrid = ({ gameState, dispatch }) => {
         data={gameState.gridData}
         renderItem={renderTile}
         numColumns={gameState.gridSize}
-        key={gameState.gridSize} // Force re-render when grid size changes
+        key={gameState.gridSize}
         scrollEnabled={false}
         contentContainerStyle={styles.flatListGrid}
         columnWrapperStyle={gameState.gridSize > 1 ? styles.gridRow : null}
@@ -611,8 +1048,8 @@ const GameGrid = ({ gameState, dispatch }) => {
   );
 };
 
-// Custom Animated Panel (replaces Modal)
-const AnimatedPanel = ({ visible, children, onClose, title }) => {
+// Custom Animated Panel with Frosted Glass Effect
+const AnimatedPanel = ({ visible, children, onClose, title, isDarkTheme }) => {
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   
@@ -651,11 +1088,23 @@ const AnimatedPanel = ({ visible, children, onClose, title }) => {
   return (
     <Animated.View style={[styles.panelOverlay, { opacity: opacityAnim }]}>
       <TouchableOpacity style={styles.panelBackdrop} onPress={onClose} activeOpacity={1} />
-      <Animated.View style={[styles.panel, { transform: [{ translateY: slideAnim }] }]}>
-        <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>{title}</Text>
+      <Animated.View style={[
+        styles.frostedPanel, 
+        { 
+          transform: [{ translateY: slideAnim }],
+          backgroundColor: isDarkTheme 
+            ? 'rgba(30, 30, 30, 0.95)' 
+            : 'rgba(255, 255, 255, 0.95)'
+        }
+      ]}>
+        <View style={[styles.panelHeader, { borderBottomColor: isDarkTheme ? '#444' : '#e0e0e0' }]}>
+          <Text style={[styles.panelTitle, { color: isDarkTheme ? '#ffffff' : '#000000' }]}>
+            {title}
+          </Text>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>✕</Text>
+            <Text style={[styles.closeButtonText, { color: isDarkTheme ? '#ffffff' : '#000000' }]}>
+              ✕
+            </Text>
           </TouchableOpacity>
         </View>
         <View style={styles.panelContent}>
@@ -677,6 +1126,7 @@ const PowerUpDisplay = ({ powerUps, onUsePowerUp }) => {
         data={powerUps}
         horizontal
         showsHorizontalScrollIndicator={false}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.powerUpChip}
@@ -692,9 +1142,10 @@ const PowerUpDisplay = ({ powerUps, onUsePowerUp }) => {
   );
 };
 
-// Main Game Screen
+// Main Game Screen with Banner
 const GameScreen = ({ gameState, dispatch }) => {
   const confettiRef = useRef(null);
+  const triggerHaptic = useHapticFeedback(); // Added missing triggerHaptic
   
   useEffect(() => {
     if (gameState.gamePhase === 'won' && confettiRef.current) {
@@ -707,18 +1158,77 @@ const GameScreen = ({ gameState, dispatch }) => {
     
     switch (powerUp.type) {
       case 'FREEZE_TIME':
-        dispatch({ type: GAME_ACTIONS.SET_TIME, payload: gameState.timeRemaining + 15 });
+        const newTime = Math.min(gameState.timeRemaining + 15, 300); // Cap at 5 minutes
+        dispatch({ type: GAME_ACTIONS.SET_TIME, payload: newTime });
+        triggerHaptic('success');
         break;
+        
       case 'TELEPORT_SWAP':
-        // Will be handled in tile press logic
+        // Allow swapping any two tiles regardless of adjacency
+        dispatch({ type: GAME_ACTIONS.SELECT_TILE, payload: null });
+        // Set a special mode that allows any swap
+        // This would need additional state management
+        triggerHaptic('medium');
         break;
-      // Add other power-up effects here
+        
+      case 'AUTO_COMPLETE':
+        // Auto-complete 2 random tiles to their correct positions
+        const incorrectTiles = gameState.gridData
+          .map((tile, index) => ({ tile, index }))
+          .filter(({ tile, index }) => {
+            if (gameState.gameMode === 'classic') {
+              return tile.number !== index + 1;
+            } else if (gameState.gameMode === 'color') {
+              const targetRowIndex = Math.floor(index / gameState.gridSize);
+              const targetColor = gameState.gridData[targetRowIndex * gameState.gridSize].targetColor;
+              return tile.color !== targetColor;
+            } else if (gameState.gameMode === 'pattern') {
+              const targetRowIndex = Math.floor(index / gameState.gridSize);
+              const targetCol = index % gameState.gridSize;
+              const patterns = generatePatterns(gameState.gridSize);
+              return tile.pattern.name !== patterns[targetCol].name;
+            }
+            return false;
+          });
+          
+        // Auto-fix up to 2 tiles
+        const tilesToFix = incorrectTiles.slice(0, 2);
+        tilesToFix.forEach(({ index }) => {
+          // Find correct position for this tile and swap
+          // This is simplified - in practice you'd need more complex logic
+          triggerHaptic('success');
+        });
+        break;
+        
+      case 'FREE_MOVES':
+        // Add 3 free moves (subtract from move count)
+        // This would need additional state management
+        triggerHaptic('light');
+        break;
+        
+      case 'ROW_HINT':
+        // Highlight the next row that can be completed
+        // This would need additional state management
+        triggerHaptic('light');
+        break;
+        
+      default:
+        break;
     }
-  }, [dispatch, gameState.timeRemaining]);
+  }, [dispatch, gameState, triggerHaptic]);
   
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: gameState.isDarkTheme ? '#1a1a1a' : '#ffffff' }]}>
+    <View style={[styles.gameContainer, { backgroundColor: gameState.isDarkTheme ? '#1a1a1a' : '#ffffff' }]}>
       <StatusBar barStyle={gameState.isDarkTheme ? 'light-content' : 'dark-content'} />
+      
+      {/* Game Banner */}
+      <View style={styles.bannerContainer}>
+        <Image 
+          source={require('./assets/images/gridzen2.png')} 
+          style={styles.gameBanner}
+          resizeMode="contain"
+        />
+      </View>
       
       {/* Game Header */}
       <View style={styles.gameHeader}>
@@ -761,8 +1271,9 @@ const GameScreen = ({ gameState, dispatch }) => {
         </TouchableOpacity>
       </View>
       
-      {/* Ads */}
-      <View style={styles.adContainer}>
+      {/* Ads - Commented out for Expo Go testing */}
+      {/*
+      <View style={styles.adContainerFixed}>
         <BannerAd
           unitId={__DEV__ ? TestIds.BANNER : 
             Platform.OS === 'ios' ? "ca-app-pub-7368779159802085/3609137514" : "ca-app-pub-7368779159802085/6628408902"}
@@ -770,6 +1281,14 @@ const GameScreen = ({ gameState, dispatch }) => {
           requestOptions={{ requestNonPersonalizedAdsOnly: true }}
           onAdFailedToLoad={(error) => console.log("Ad failed to load:", error)}
         />
+      </View>
+      */}
+      
+      {/* Placeholder for ad space during testing */}
+      <View style={[styles.adContainerFixed, { backgroundColor: '#f0f0f0', justifyContent: 'center' }]}>
+        <Text style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>
+          Ad Space (Disabled for Testing)
+        </Text>
       </View>
       
       {/* Confetti */}
@@ -780,18 +1299,18 @@ const GameScreen = ({ gameState, dispatch }) => {
         autoStart={false}
         fadeOut={true}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
-// Menu Screen
+// Menu Screen with Game Mode Selector
 const MenuScreen = ({ gameState, dispatch }) => {
   const startGame = useCallback(() => {
-    const gridData = createGridData(gameState.gridSize, true);
+    const gridData = createGridData(gameState.gridSize, gameState.gameMode, true);
     dispatch({ type: GAME_ACTIONS.SET_GRID_DATA, payload: gridData });
     dispatch({ type: GAME_ACTIONS.START_NEW_GAME });
-    dispatch({ type: GAME_ACTIONS.SET_TIME, payload: 60 }); // Default time
-  }, [gameState.gridSize, dispatch]);
+    dispatch({ type: GAME_ACTIONS.SET_TIME, payload: 60 });
+  }, [gameState.gridSize, gameState.gameMode, dispatch]);
   
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: gameState.isDarkTheme ? '#1a1a1a' : '#ffffff' }]}>
@@ -799,27 +1318,47 @@ const MenuScreen = ({ gameState, dispatch }) => {
       
       <View style={styles.menuContent}>
         <Text style={[styles.title, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
-          GRIDZEN 2.0
+          GRIDZEN 2
         </Text>
         
         <Text style={[styles.subtitle, { color: gameState.isDarkTheme ? '#cccccc' : '#666666' }]}>
           3D Tile Puzzle with Row Completion
         </Text>
         
-        <TextInput
-          style={[styles.nameInput, { 
-            backgroundColor: gameState.isDarkTheme ? '#333333' : '#f5f5f5',
-            color: gameState.isDarkTheme ? '#ffffff' : '#000000'
-          }]}
-          placeholder="Enter your name"
-          placeholderTextColor={gameState.isDarkTheme ? '#999999' : '#666666'}
-          value={gameState.playerProfile.name}
-          onChangeText={(text) => dispatch({
-            type: GAME_ACTIONS.UPDATE_PLAYER_PROFILE,
-            payload: { ...gameState.playerProfile, name: text }
-          })}
-        />
+        {/* Game Services Status */}
+        <GameServicesStatus gameState={gameState} dispatch={dispatch} />
         
+        {/* Game Mode Selector */}
+        <View style={styles.gameModeContainer}>
+          <Text style={[styles.label, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
+            Game Mode
+          </Text>
+          <View style={styles.gameModeButtons}>
+            {Object.entries(GAME_MODE_CONFIG).map(([mode, config]) => (
+              <TouchableOpacity
+                key={mode}
+                style={[
+                  styles.gameModeButton,
+                  { 
+                    backgroundColor: gameState.gameMode === mode ? '#4CAF50' : (gameState.isDarkTheme ? '#333333' : '#e0e0e0'),
+                    borderColor: gameState.gameMode === mode ? '#4CAF50' : 'transparent'
+                  }
+                ]}
+                onPress={() => dispatch({ type: GAME_ACTIONS.SET_GAME_MODE, payload: mode })}
+              >
+                <Text style={styles.gameModeEmoji}>{config.emoji}</Text>
+                <Text style={[
+                  styles.gameModeText,
+                  { color: gameState.gameMode === mode ? '#ffffff' : (gameState.isDarkTheme ? '#ffffff' : '#000000') }
+                ]}>
+                  {config.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        
+        {/* Grid Size Selector */}
         <View style={styles.gridSizeContainer}>
           <Text style={[styles.label, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
             Grid Size: {gameState.gridSize}x{gameState.gridSize}
@@ -843,6 +1382,13 @@ const MenuScreen = ({ gameState, dispatch }) => {
               </TouchableOpacity>
             ))}
           </View>
+          
+          {/* Game Mode Description */}
+          <View style={styles.gameModeDescription}>
+            <Text style={[styles.descriptionText, { color: gameState.isDarkTheme ? '#cccccc' : '#666666' }]}>
+              {GAME_MODE_CONFIG[gameState.gameMode].description}
+            </Text>
+          </View>
         </View>
         
         <TouchableOpacity style={styles.startButton} onPress={startGame}>
@@ -851,17 +1397,21 @@ const MenuScreen = ({ gameState, dispatch }) => {
         
         <View style={styles.menuButtons}>
           <TouchableOpacity
-            style={styles.menuButton}
+            style={[styles.menuButton, { backgroundColor: gameState.isDarkTheme ? '#333333' : '#f0f0f0' }]}
             onPress={() => dispatch({ type: GAME_ACTIONS.SHOW_PANEL, payload: 'settings' })}
           >
-            <Text style={styles.menuButtonText}>⚙️ Settings</Text>
+            <Text style={[styles.menuButtonText, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
+              ⚙️ Settings
+            </Text>
           </TouchableOpacity>
           
           <TouchableOpacity
-            style={styles.menuButton}
+            style={[styles.menuButton, { backgroundColor: gameState.isDarkTheme ? '#333333' : '#f0f0f0' }]}
             onPress={() => dispatch({ type: GAME_ACTIONS.SHOW_PANEL, payload: 'scores' })}
           >
-            <Text style={styles.menuButtonText}>🏆 Scores</Text>
+            <Text style={[styles.menuButtonText, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
+              🏆 Scores
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -871,10 +1421,13 @@ const MenuScreen = ({ gameState, dispatch }) => {
         visible={gameState.visiblePanel === 'settings'}
         title="Settings"
         onClose={() => dispatch({ type: GAME_ACTIONS.HIDE_PANEL })}
+        isDarkTheme={gameState.isDarkTheme}
       >
         <View style={styles.settingsContent}>
           <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Dark Theme</Text>
+            <Text style={[styles.settingLabel, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
+              Dark Theme
+            </Text>
             <TouchableOpacity
               style={[styles.toggle, { backgroundColor: gameState.isDarkTheme ? '#4CAF50' : '#cccccc' }]}
               onPress={() => dispatch({ type: GAME_ACTIONS.TOGGLE_THEME })}
@@ -886,7 +1439,9 @@ const MenuScreen = ({ gameState, dispatch }) => {
           </View>
           
           <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Sounds</Text>
+            <Text style={[styles.settingLabel, { color: gameState.isDarkTheme ? '#ffffff' : '#000000' }]}>
+              Sounds
+            </Text>
             <TouchableOpacity
               style={[styles.toggle, { backgroundColor: gameState.soundsEnabled ? '#4CAF50' : '#cccccc' }]}
               onPress={() => dispatch({ type: GAME_ACTIONS.TOGGLE_SOUNDS })}
@@ -904,8 +1459,11 @@ const MenuScreen = ({ gameState, dispatch }) => {
         visible={gameState.visiblePanel === 'scores'}
         title="High Scores"
         onClose={() => dispatch({ type: GAME_ACTIONS.HIDE_PANEL })}
+        isDarkTheme={gameState.isDarkTheme}
       >
-        <Text style={styles.comingSoonText}>High scores coming soon!</Text>
+        <Text style={[styles.comingSoonText, { color: gameState.isDarkTheme ? '#cccccc' : '#666666' }]}>
+          High scores coming soon!
+        </Text>
       </AnimatedPanel>
     </SafeAreaView>
   );
@@ -944,14 +1502,23 @@ const SplashScreen = ({ onFinish }) => {
 
 const GridZen2 = () => {
   const [gameState, dispatch] = useReducer(gameStateReducer, INITIAL_STATE);
+  const alertShownRef = useRef(false);
   
   // Custom hooks
   useGameTimer(gameState, dispatch);
   usePersistence(gameState, dispatch);
+  useGameServices(dispatch);
   
   const handleSplashFinish = useCallback(() => {
     dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' });
   }, []);
+  
+  // Reset alert flag when returning to menu
+  useEffect(() => {
+    if (gameState.gamePhase === 'menu') {
+      alertShownRef.current = false;
+    }
+  }, [gameState.gamePhase]);
   
   // Game phase routing
   const renderCurrentScreen = () => {
@@ -963,18 +1530,41 @@ const GridZen2 = () => {
       case 'playing':
         return <GameScreen gameState={gameState} dispatch={dispatch} />;
       case 'won':
-        Alert.alert(
-          'Congratulations!',
-          `You won in ${gameState.moveCount} moves with ${gameState.completedRows.size} completed rows!`,
-          [{ text: 'OK', onPress: () => dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' }) }]
-        );
+        // Use a ref to prevent multiple alerts
+        if (!alertShownRef.current) {
+          alertShownRef.current = true;
+          setTimeout(() => {
+            Alert.alert(
+              'Congratulations!',
+              `You won in ${gameState.moveCount} moves with ${gameState.completedRows.size} completed rows!`,
+              [{ 
+                text: 'OK', 
+                onPress: () => {
+                  alertShownRef.current = false;
+                  dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' });
+                }
+              }]
+            );
+          }, 500);
+        }
         return <GameScreen gameState={gameState} dispatch={dispatch} />;
       case 'gameOver':
-        Alert.alert(
-          'Game Over!',
-          'Time\'s up! Try again.',
-          [{ text: 'OK', onPress: () => dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' }) }]
-        );
+        if (!alertShownRef.current) {
+          alertShownRef.current = true;
+          setTimeout(() => {
+            Alert.alert(
+              'Game Over!',
+              'Time\'s up! Try again.',
+              [{ 
+                text: 'OK', 
+                onPress: () => {
+                  alertShownRef.current = false;
+                  dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' });
+                }
+              }]
+            );
+          }, 500);
+        }
         return <MenuScreen gameState={gameState} dispatch={dispatch} />;
       default:
         return <MenuScreen gameState={gameState} dispatch={dispatch} />;
@@ -984,7 +1574,7 @@ const GridZen2 = () => {
   if (!gameState.isInitialized && gameState.gamePhase !== 'splash') {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading GridZen 2.0...</Text>
+        <Text style={styles.loadingText}>Loading GridZen 2...</Text>
       </View>
     );
   }
@@ -1002,6 +1592,12 @@ const GridZen2 = () => {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: '#ffffff'
+  },
+  
+  // Game Container
+  gameContainer: {
     flex: 1,
     backgroundColor: '#ffffff'
   },
@@ -1045,6 +1641,17 @@ const styles = StyleSheet.create({
     marginTop: 20
   },
   
+  // Banner
+  bannerContainer: {
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 10 : 20,
+    paddingBottom: 10
+  },
+  gameBanner: {
+    width: SCREEN_WIDTH * 0.8,
+    height: 60
+  },
+  
   // Menu
   menuContent: {
     flex: 1,
@@ -1063,18 +1670,86 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 30
   },
-  nameInput: {
+  
+  // Game Services
+  gameServicesContainer: {
     width: '100%',
+    alignItems: 'center',
+    marginBottom: 25
+  },
+  welcomeText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center'
+  },
+  gameServicesSubtext: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 4
+  },
+  signInButton: {
     padding: 15,
     borderRadius: 10,
-    fontSize: 16,
-    marginBottom: 30,
+    alignItems: 'center',
+    width: '100%',
     borderWidth: 1,
     borderColor: 'transparent'
   },
+  signInButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center'
+  },
+  signInSubtext: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4
+  },
+  
+  // Game Mode Selector
+  gameModeContainer: {
+    width: '100%',
+    marginBottom: 20
+  },
+  gameModeButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 10
+  },
+  gameModeButton: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 2
+  },
+  gameModeEmoji: {
+    fontSize: 20,
+    marginBottom: 4
+  },
+  gameModeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center'
+  },
+  
+  // Grid Size
   gridSizeContainer: {
     width: '100%',
-    marginBottom: 30
+    marginBottom: 25
+  },
+  
+  // Game Mode Description
+  gameModeDescription: {
+    marginTop: 15,
+    paddingHorizontal: 10,
+    alignItems: 'center'
+  },
+  descriptionText: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    fontStyle: 'italic'
   },
   label: {
     fontSize: 18,
@@ -1118,7 +1793,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     padding: 12,
     borderRadius: 10,
-    minWidth: 100
+    minWidth: 100,
+    borderWidth: 1,
+    borderColor: 'transparent'
   },
   menuButtonText: {
     fontSize: 14,
@@ -1178,6 +1855,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center'
   },
+  colorIndicator: {
+    width: '70%',
+    height: '70%',
+    borderRadius: 12,
+    borderWidth: 3,
+    borderColor: '#ffffff'
+  },
+  patternContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%'
+  },
+  patternSymbol: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center'
+  },
   lockIcon: {
     position: 'absolute',
     top: 2,
@@ -1223,7 +1918,7 @@ const styles = StyleSheet.create({
   // Game Controls
   gameControls: {
     alignItems: 'center',
-    marginBottom: 20
+    marginBottom: 80 // Space for fixed ad
   },
   controlButton: {
     backgroundColor: '#f0f0f0',
@@ -1237,40 +1932,48 @@ const styles = StyleSheet.create({
     textAlign: 'center'
   },
   
-  // Ads
-  adContainer: {
+  // Fixed Ads (placeholder during testing)
+  adContainerFixed: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60, // Standard banner ad height
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: 20
+    backgroundColor: 'transparent'
   },
   
-  // Animated Panels
+  // Frosted Glass Panels
   panelOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     zIndex: 1000
   },
   panelBackdrop: {
     flex: 1
   },
-  panel: {
-    backgroundColor: '#ffffff',
+  frostedPanel: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: SCREEN_HEIGHT * 0.8,
-    minHeight: 200
+    minHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 20
   },
   panelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0'
+    borderBottomWidth: 1
   },
   panelTitle: {
     fontSize: 20,
@@ -1319,7 +2022,6 @@ const styles = StyleSheet.create({
   comingSoonText: {
     fontSize: 16,
     textAlign: 'center',
-    color: '#666666',
     fontStyle: 'italic'
   }
 });

@@ -21,7 +21,6 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
       "buildNumber": "1",
-      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "SKAdNetworkItems": [
@@ -35,29 +34,20 @@
       "package": "com.steveomatic.gridzen2",
       "versionCode": 1,
       "edgeToEdgeEnabled": true,
-      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/playstore.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "com.google.android.gms.permission.AD_ID"
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
       "favicon": "./assets/images/playstore.png"
     },
     "plugins": [
-      "expo-system-ui",
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-7368779159802085~6120308292",
-          "iosAppId": "ca-app-pub-7368779159802085~2981633317"
-        }
-      ]
+      "expo-system-ui"
     ],
     "extra": {
       "eas": {

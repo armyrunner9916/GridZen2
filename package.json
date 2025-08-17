@@ -16,12 +16,14 @@
     "expo-haptics": "~14.1.4",
     "expo-linear-gradient": "~14.1.5",
     "expo-system-ui": "~5.0.10",
+    "fix": "^0.0.3",
     "react": "19.0.0",
     "react-native": "0.79.5",
     "react-native-confetti-cannon": "1.5.2",
     "react-native-gesture-handler": "~2.24.0",
     "react-native-google-mobile-ads": "^14.2.3",
-    "react-native-reanimated": "~3.17.4"
+    "react-native-reanimated": "~3.17.4",
+    "expo-dev-client": "~5.2.4"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
