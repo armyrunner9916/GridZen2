@@ -13,3 +13,6 @@ npm-debug.*
 web-build/
 android/
 ios/
+
+# Ignore screenshots (not needed for build)
+new-screenshots/
