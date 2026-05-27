@@ -362,6 +362,40 @@ function checkStrategicError(completedRows, gridSize) {
   return rows.some(r => r > 0 && r < gridSize - 1);
 }
 
+// Pure evaluation of a grid against its mode. Returns which rows are newly
+// complete, whether the whole grid is a win, and whether the player has
+// triggered a strategic error. Used by both swipe-swaps and power-up swaps
+// so they share one truth path.
+const evaluateGrid = (newGrid, gridSize, gameMode, prevCompletedRows) => {
+  const after = new Set(prevCompletedRows);
+  const newlyCompleted = [];
+  for (let r = 0; r < gridSize; r++) {
+    if (!after.has(r) && checkRowCompletion(newGrid, gridSize, r, gameMode)) {
+      after.add(r);
+      newlyCompleted.push(r);
+    }
+  }
+  let isWin = true;
+  for (let r = 0; r < gridSize; r++) {
+    if (!checkRowCompletion(newGrid, gridSize, r, gameMode)) { isWin = false; break; }
+  }
+  return {
+    completedRowsAfter: after,
+    newlyCompleted,
+    isWin,
+    isStrategicError: !isWin && checkStrategicError(after, gridSize),
+  };
+};
+
+// Apply a swap to a grid array immutably and return the new array.
+const applySwap = (grid, fromIndex, toIndex) => {
+  const next = grid.slice();
+  const tmp = next[fromIndex];
+  next[fromIndex] = { ...next[toIndex], currentIndex: fromIndex };
+  next[toIndex] = { ...tmp, currentIndex: toIndex };
+  return next;
+};
+
 // ============================================================================
 // Hooks
 // ============================================================================
@@ -389,6 +423,51 @@ const useHaptic = () => useCallback((kind = 'light') => {
     }
   } catch { }
 }, []);
+
+// Shared post-change evaluation. Whenever the grid changes (via swipe OR
+// power-up), call this with the new grid + the completed-rows set known
+// *before* the change. It dispatches the right reducer actions for newly
+// completed rows, win state, and strategic-error state. Power-ups previously
+// skipped this path, so completing a row via Auto-Complete / Teleport never
+// registered a win.
+const useGameEvaluation = (state, dispatch, trigger) => {
+  return useCallback((newGrid, prevCompletedRows) => {
+    const result = evaluateGrid(newGrid, state.gridSize, state.gameMode, prevCompletedRows);
+
+    for (const r of result.newlyCompleted) {
+      trigger('success');
+      dispatch({ type: GAME_ACTIONS.COMPLETE_ROW, payload: { rowIndex: r } });
+      const keys = Object.keys(POWER_UP_CONFIG);
+      const t = keys[Math.floor(Math.random() * keys.length)];
+      const cfg = POWER_UP_CONFIG[t];
+      dispatch({
+        type: GAME_ACTIONS.ADD_POWER_UP,
+        payload: {
+          id: String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8),
+          type: t, icon: cfg.icon, name: cfg.name,
+          description: cfg.description, effect: cfg.effect,
+        }
+      });
+    }
+
+    if (result.isWin) {
+      dispatch({
+        type: GAME_ACTIONS.SAVE_HIGH_SCORE,
+        payload: {
+          gameMode: state.gameMode,
+          gridSize: state.gridSize,
+          score: { moves: state.moveCount, time: 60 - state.timeRemaining, date: Date.now() }
+        }
+      });
+      dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'won' });
+      return;
+    }
+
+    if (result.isStrategicError) {
+      dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'strategicError' });
+    }
+  }, [dispatch, state.gridSize, state.gameMode, state.moveCount, state.timeRemaining, trigger]);
+};
 
 // Persistence — lives only in root GridZen2 component
 const usePersistence = (state, dispatch) => {
@@ -465,7 +544,7 @@ const useZenMusic = (gamePhase, musicEnabled) => {
 // Components
 // ============================================================================
 
-const GameTile = React.memo(({ tile, index, gridSize, isLocked, isCompleted, isHinted, onSwipe, state, theme }) => {
+const GameTile = React.memo(({ tile, index, gridSize, gameMode, isLocked, isCompleted, isHinted, onSwipe, theme }) => {
   const trigger = useHaptic();
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -499,19 +578,19 @@ const GameTile = React.memo(({ tile, index, gridSize, isLocked, isCompleted, isH
 
   let gradientColors;
   if (isCompleted) gradientColors = ['#4169E1', '#1E90FF', '#87CEEB'];
-  else if (state.gameMode === 'color') gradientColors = [tile.color, tile.color + 'dd', tile.color + 'bb'];
-  else if (state.gameMode === 'pattern') gradientColors = [tile.pattern.color, tile.pattern.color + 'dd', tile.pattern.color + 'bb'];
+  else if (gameMode === 'color') gradientColors = [tile.color, tile.color + 'dd', tile.color + 'bb'];
+  else if (gameMode === 'pattern') gradientColors = [tile.pattern.color, tile.pattern.color + 'dd', tile.pattern.color + 'bb'];
   else gradientColors = [tile.color, tile.color + 'dd', tile.color + 'bb'];
 
   const renderTileContent = () => {
-    if (state.gameMode === 'classic') {
+    if (gameMode === 'classic') {
       return (
         <Text style={[styles.tileNumber, { fontSize: Math.min(28, tileSize / 2.5), color: '#000' }]}>
           {tile.number}
         </Text>
       );
-    } else if (state.gameMode === 'color') {
-      return <View style={[styles.colorIndicator, { backgroundColor: tile.color }]} />;
+    } else if (gameMode === 'color') {
+      return null;
     } else {
       return (
         <Text
@@ -562,63 +641,8 @@ const GameTile = React.memo(({ tile, index, gridSize, isLocked, isCompleted, isH
   );
 });
 
-const GameGrid = ({ state, dispatch, theme }) => {
+const GameGrid = ({ state, dispatch, theme, evaluate }) => {
   const trigger = useHaptic();
-
-  const checkWinCondition = useCallback((grid) => {
-    for (let r = 0; r < state.gridSize; r++) {
-      if (!checkRowCompletion(grid, state.gridSize, r, state.gameMode)) return false;
-    }
-    return true;
-  }, [state.gridSize, state.gameMode]);
-
-  // evaluateAfterSwap receives currentCompletedRows explicitly to avoid stale
-  // closure bugs. useCallback closes over state at render time; if a previous
-  // swap's dispatch hasn't flushed yet the closure sees an outdated
-  // completedRows and checkStrategicError fires a false positive.
-  // Passing the Set in from performSwap (which builds it synchronously from
-  // the current grid) guarantees we always have the full picture.
-  const evaluateAfterSwap = useCallback((newGrid, currentCompletedRows) => {
-    const after = new Set(currentCompletedRows);
-    for (let r = 0; r < state.gridSize; r++) {
-      if (checkRowCompletion(newGrid, state.gridSize, r, state.gameMode)) after.add(r);
-    }
-
-    for (const r of after) {
-      if (!currentCompletedRows.has(r)) {
-        trigger('success');
-        dispatch({ type: GAME_ACTIONS.COMPLETE_ROW, payload: { rowIndex: r } });
-        const keys = Object.keys(POWER_UP_CONFIG);
-        const t = keys[Math.floor(Math.random() * keys.length)];
-        const cfg = POWER_UP_CONFIG[t];
-        dispatch({
-          type: GAME_ACTIONS.ADD_POWER_UP,
-          payload: {
-            id: String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8),
-            type: t, icon: cfg.icon, name: cfg.name,
-            description: cfg.description, effect: cfg.effect
-          }
-        });
-      }
-    }
-
-    if (checkWinCondition(newGrid)) {
-      dispatch({
-        type: GAME_ACTIONS.SAVE_HIGH_SCORE,
-        payload: {
-          gameMode: state.gameMode,
-          gridSize: state.gridSize,
-          score: { moves: state.moveCount, time: 60 - state.timeRemaining, date: Date.now() }
-        }
-      });
-      dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'won' });
-      return;
-    }
-
-    if (checkStrategicError(after, state.gridSize)) {
-      dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'strategicError' });
-    }
-  }, [dispatch, state.gridSize, state.gameMode, state.moveCount, state.timeRemaining, trigger, checkWinCondition]);
 
   const performSwap = useCallback((fromIndex, toIndex) => {
     trigger('medium');
@@ -626,16 +650,9 @@ const GameGrid = ({ state, dispatch, theme }) => {
     if (state.freeMovesRemaining > 0) dispatch({ type: GAME_ACTIONS.CONSUME_FREE_MOVE });
     else dispatch({ type: GAME_ACTIONS.INCREMENT_MOVES });
 
-    const newGrid = state.gridData.slice();
-    const tmp = newGrid[fromIndex];
-    newGrid[fromIndex] = { ...newGrid[toIndex], currentIndex: fromIndex };
-    newGrid[toIndex] = { ...tmp, currentIndex: toIndex };
-
-    // Pass state.completedRows directly — synchronous read of the current Set
-    // before any dispatches above have re-rendered the component, so it is
-    // accurate for this swap. evaluateAfterSwap builds its own 'after' on top.
-    evaluateAfterSwap(newGrid, state.completedRows);
-  }, [dispatch, state.gridData, state.freeMovesRemaining, state.completedRows, trigger, evaluateAfterSwap]);
+    const newGrid = applySwap(state.gridData, fromIndex, toIndex);
+    evaluate(newGrid, state.completedRows);
+  }, [dispatch, state.gridData, state.freeMovesRemaining, state.completedRows, trigger, evaluate]);
 
   const onSwipe = useCallback((index, direction) => {
     if (state.gamePhase !== 'playing' && state.gamePhase !== 'strategicError') return;
@@ -655,45 +672,29 @@ const GameGrid = ({ state, dispatch, theme }) => {
     if (target !== index) performSwap(index, target);
   }, [state.gamePhase, state.gridSize, state.lockedTiles, performSwap]);
 
-  const renderItem = useCallback(({ item, index }) => {
-    const isLocked = state.lockedTiles.has(index);
-    const rowIndex = Math.floor(index / state.gridSize);
-    const isCompleted = state.completedRows.has(rowIndex);
-    const isHinted = state.hintRowIndex === rowIndex;
-    return (
-      <GameTile
-        tile={item}
-        index={index}
-        gridSize={state.gridSize}
-        isLocked={isLocked}
-        isCompleted={isCompleted}
-        isHinted={isHinted}
-        onSwipe={onSwipe}
-        state={state}
-        theme={theme}
-      />
-    );
-  }, [state, onSwipe, theme]);
-
+  // Plain View grid — FlatList overhead is wasted on 16-36 static items, and
+  // the prior implementation re-rendered every tile on every state change.
   return (
     <View style={styles.gridContainer}>
-      <FlatList
-        data={state.gridData}
-        renderItem={renderItem}
-        keyExtractor={(it, i) => (it && it.id) ? it.id : String(i)}
-        numColumns={state.gridSize}
-        key={state.gridSize}
-        scrollEnabled={false}
-        contentContainerStyle={styles.flatListGrid}
-        columnWrapperStyle={state.gridSize > 1 ? styles.gridRow : null}
-        nestedScrollEnabled={false}
-        showsVerticalScrollIndicator={false}
-        showsHorizontalScrollIndicator={false}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={state.gridSize * 2}
-        windowSize={3}
-        initialNumToRender={state.gridSize * state.gridSize}
-      />
+      <View style={[styles.gridFlex, { width: SCREEN_WIDTH * 0.8 }]}>
+        {state.gridData.map((tile, index) => {
+          const rowIndex = Math.floor(index / state.gridSize);
+          return (
+            <GameTile
+              key={tile.id || index}
+              tile={tile}
+              index={index}
+              gridSize={state.gridSize}
+              gameMode={state.gameMode}
+              isLocked={state.lockedTiles.has(index)}
+              isCompleted={state.completedRows.has(rowIndex)}
+              isHinted={state.hintRowIndex === rowIndex}
+              onSwipe={onSwipe}
+              theme={theme}
+            />
+          );
+        })}
+      </View>
     </View>
   );
 };
@@ -737,14 +738,21 @@ const ToggleChip = ({ onPress, label, chipBg, chipText }) => (
 // ============================================================================
 const GameScreen = ({ state, dispatch, isAdFree }) => {
   const confettiRef = useRef(null);
+  const confettiFiredRef = useRef(false);
   const trigger = useHaptic();
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => makeTheme(state.isDarkTheme), [state.isDarkTheme]);
+  const evaluate = useGameEvaluation(state, dispatch, trigger);
 
   useGameTimer(state, dispatch);
 
   useEffect(() => {
-    if (state.gamePhase === 'won' && confettiRef.current) confettiRef.current.start();
+    if (state.gamePhase === 'won' && confettiRef.current && !confettiFiredRef.current) {
+      confettiFiredRef.current = true;
+      confettiRef.current.start();
+    } else if (state.gamePhase !== 'won') {
+      confettiFiredRef.current = false;
+    }
   }, [state.gamePhase]);
 
   const handleUsePowerUp = useCallback((powerUp) => {
@@ -787,58 +795,64 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
         break;
       }
       case 'AUTO_COMPLETE': {
+        // Build a local grid and apply each fix to it, so the next iteration
+        // sees the most recent swap. Old version re-read state.gridData each
+        // iteration — that closure was stale and could undo prior swaps.
         let fixes = POWER_UP_CONFIG.AUTO_COMPLETE.effect;
         const size = state.gridSize;
         const mode = state.gameMode;
+        let grid = state.gridData.slice();
         if (mode === 'classic') {
-          for (let i = 0; i < state.gridData.length && fixes > 0; i++) {
-            if (state.gridData[i].number !== i + 1) {
-              const j = state.gridData.findIndex(t => t.number === i + 1);
-              if (j !== -1) { dispatch({ type: GAME_ACTIONS.SWAP_TILES, payload: { fromIndex: i, toIndex: j } }); fixes--; }
+          for (let i = 0; i < grid.length && fixes > 0; i++) {
+            if (grid[i].number !== i + 1) {
+              const j = grid.findIndex(t => t.number === i + 1);
+              if (j !== -1 && j !== i) { grid = applySwap(grid, i, j); fixes--; }
             }
           }
         } else if (mode === 'color') {
           for (let r = 0; r < size && fixes > 0; r++) {
             const start = r * size;
-            const row = state.gridData.slice(start, start + size);
+            const row = grid.slice(start, start + size);
             const target = row[0].targetColor;
             const wrongIdx = row.findIndex(t => t.color !== target);
             if (wrongIdx !== -1) {
               const globalWrong = start + wrongIdx;
-              const donor = state.gridData.findIndex((t, idx) => Math.floor(idx / size) !== r && t.color === target);
-              if (donor !== -1) { dispatch({ type: GAME_ACTIONS.SWAP_TILES, payload: { fromIndex: globalWrong, toIndex: donor } }); fixes--; }
+              const donor = grid.findIndex((t, idx) => Math.floor(idx / size) !== r && t.color === target);
+              if (donor !== -1) { grid = applySwap(grid, globalWrong, donor); fixes--; }
             }
           }
         } else {
           for (let r = 0; r < size && fixes > 0; r++) {
             const start = r * size;
-            const row = state.gridData.slice(start, start + size);
+            const row = grid.slice(start, start + size);
             const counts = {};
             row.forEach(t => { counts[t.pattern.name] = (counts[t.pattern.name] || 0) + 1; });
             const targetName = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
             const wrongIdx = row.findIndex(t => t.pattern.name !== targetName);
             if (wrongIdx !== -1) {
               const globalWrong = start + wrongIdx;
-              const donor = state.gridData.findIndex((t, idx) =>
+              const donor = grid.findIndex((t, idx) =>
                 Math.floor(idx / size) !== r && t.pattern.name === targetName
               );
-              if (donor !== -1) {
-                dispatch({ type: GAME_ACTIONS.SWAP_TILES, payload: { fromIndex: globalWrong, toIndex: donor } });
-                fixes--;
-              }
+              if (donor !== -1) { grid = applySwap(grid, globalWrong, donor); fixes--; }
             }
           }
+        }
+        if (grid !== state.gridData) {
+          dispatch({ type: GAME_ACTIONS.SET_GRID_DATA, payload: grid });
+          evaluate(grid, state.completedRows);
         }
         trigger('success');
         break;
       }
       case 'TELEPORT_SWAP': {
-        const grid = state.gridData;
+        let grid = state.gridData;
+        let swap = null;
         if (state.gameMode === 'classic') {
           for (let i = 0; i < grid.length; i++) {
             if (grid[i].number !== i + 1) {
               const j = grid.findIndex(t => t.number === i + 1);
-              if (j !== -1) { dispatch({ type: GAME_ACTIONS.SWAP_TILES, payload: { fromIndex: i, toIndex: j } }); break; }
+              if (j !== -1 && j !== i) { swap = [i, j]; break; }
             }
           }
         } else if (state.gameMode === 'color') {
@@ -850,7 +864,7 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
             if (wrong !== -1) {
               const globalWrong = start + wrong;
               const donor = grid.findIndex((t, idx) => Math.floor(idx / state.gridSize) !== r && t.color === target);
-              if (donor !== -1) { dispatch({ type: GAME_ACTIONS.SWAP_TILES, payload: { fromIndex: globalWrong, toIndex: donor } }); break; }
+              if (donor !== -1) { swap = [globalWrong, donor]; break; }
             }
           }
         } else {
@@ -866,19 +880,21 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
               const donor = grid.findIndex((t, idx) =>
                 Math.floor(idx / state.gridSize) !== r && t.pattern.name === targetName
               );
-              if (donor !== -1) {
-                dispatch({ type: GAME_ACTIONS.SWAP_TILES, payload: { fromIndex: globalWrong, toIndex: donor } });
-                break;
-              }
+              if (donor !== -1) { swap = [globalWrong, donor]; break; }
             }
           }
+        }
+        if (swap) {
+          const newGrid = applySwap(grid, swap[0], swap[1]);
+          dispatch({ type: GAME_ACTIONS.SET_GRID_DATA, payload: newGrid });
+          evaluate(newGrid, state.completedRows);
         }
         trigger('success');
         break;
       }
       default: break;
     }
-  }, [dispatch, state.timeRemaining, state.gridSize, state.gridData, state.gameMode, trigger]);
+  }, [dispatch, state.timeRemaining, state.gridSize, state.gridData, state.gameMode, state.completedRows, trigger, evaluate]);
 
   const toggleTheme = useCallback(() => {
     dispatch({ type: GAME_ACTIONS.SET_DARK_THEME, payload: !state.isDarkTheme });
@@ -921,7 +937,7 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
       </View>
 
       {/* Grid */}
-      <GameGrid state={state} dispatch={dispatch} theme={theme} />
+      <GameGrid state={state} dispatch={dispatch} theme={theme} evaluate={evaluate} />
 
       {/* Power-ups */}
       <PowerUpDisplay powerUps={state.availablePowerUps} onUse={handleUsePowerUp} theme={theme} />
@@ -1281,8 +1297,7 @@ const styles = StyleSheet.create({
   gameHeaderText: { fontSize: 16, fontWeight: 'bold' },
 
   gridContainer: { alignItems: 'center', marginBottom: 16 },
-  flatListGrid: { alignItems: 'center' },
-  gridRow: { justifyContent: 'center' },
+  gridFlex: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' },
 
   tileContainer: { margin: 4 },
   tile3D: {
@@ -1298,7 +1313,6 @@ const styles = StyleSheet.create({
     borderWidth: 1
   },
   tileNumber: { fontWeight: 'bold', textAlign: 'center' },
-  colorIndicator: { width: '70%', height: '70%', borderRadius: 12, borderWidth: 3, borderColor: '#ffffff' },
   patternSymbol: { fontSize: 20, fontWeight: 'bold', textAlign: 'center' },
   lockIcon: { position: 'absolute', top: 2, right: 2 },
   lockEmoji: { fontSize: 12 },
