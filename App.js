@@ -74,11 +74,18 @@ const GAME_ACTIONS = {
   RESUME_GAME: 'RESUME_GAME',
   SHOW_PANEL: 'SHOW_PANEL',
   HIDE_PANEL: 'HIDE_PANEL',
+  SHOW_STRATEGIC_WARNING: 'SHOW_STRATEGIC_WARNING',
+  HIDE_STRATEGIC_WARNING: 'HIDE_STRATEGIC_WARNING',
   SET_DARK_THEME: 'SET_DARK_THEME',
   SET_MUSIC_ENABLED: 'SET_MUSIC_ENABLED',
   SAVE_HIGH_SCORE: 'SAVE_HIGH_SCORE',
   LOAD_LEADERBOARDS: 'LOAD_LEADERBOARDS',
 };
+
+// Time budget scales with grid size. 60s for 4x4 is generous; 60s for 6x6
+// is brutal. Each step up gets more time but stays beatable.
+const TIME_FOR_SIZE = { 4: 60, 5: 90, 6: 130 };
+const MAX_POWER_UPS = 5;
 
 const INITIAL_STATE = {
   gamePhase: 'menu',
@@ -99,6 +106,8 @@ const INITIAL_STATE = {
   isDarkTheme: false,
   musicEnabled: true,
   visiblePanel: null,
+  strategicWarningVisible: false,
+  strategicWarningShown: false,
   leaderboards: {
     classic: { '4x4': [], '5x5': [], '6x6': [] },
     color: { '4x4': [], '5x5': [], '6x6': [] },
@@ -177,8 +186,11 @@ function gameStateReducer(state, action) {
       for (let c = 0; c < state.gridSize; c++) lockedTiles.add(r * state.gridSize + c);
       return { ...state, completedRows, lockedTiles, rowCompletionStreak: state.rowCompletionStreak + 1 };
     }
-    case GAME_ACTIONS.ADD_POWER_UP:
-      return { ...state, availablePowerUps: state.availablePowerUps.concat([action.payload]) };
+    case GAME_ACTIONS.ADD_POWER_UP: {
+      const next = state.availablePowerUps.concat([action.payload]);
+      // Cap at MAX_POWER_UPS so the chip rail never overflows; drop oldest.
+      return { ...state, availablePowerUps: next.slice(-MAX_POWER_UPS) };
+    }
     case GAME_ACTIONS.USE_POWER_UP:
       return { ...state, availablePowerUps: state.availablePowerUps.filter(p => p.id !== action.payload.id), activePowerUp: action.payload.type };
     case GAME_ACTIONS.CLEAR_POWER_UPS:
@@ -212,12 +224,18 @@ function gameStateReducer(state, action) {
         availablePowerUps: [],
         activePowerUp: null,
         freeMovesRemaining: 0,
-        hintRowIndex: null
+        hintRowIndex: null,
+        strategicWarningVisible: false,
+        strategicWarningShown: false,
       };
     case GAME_ACTIONS.SHOW_PANEL:
       return { ...state, visiblePanel: action.payload };
     case GAME_ACTIONS.HIDE_PANEL:
       return { ...state, visiblePanel: null };
+    case GAME_ACTIONS.SHOW_STRATEGIC_WARNING:
+      return { ...state, strategicWarningVisible: true, strategicWarningShown: true };
+    case GAME_ACTIONS.HIDE_STRATEGIC_WARNING:
+      return { ...state, strategicWarningVisible: false };
     case GAME_ACTIONS.SET_DARK_THEME:
       return { ...state, isDarkTheme: !!action.payload };
     case GAME_ACTIONS.SET_MUSIC_ENABLED:
@@ -464,10 +482,12 @@ const useGameEvaluation = (state, dispatch, trigger) => {
       return;
     }
 
-    if (result.isStrategicError) {
-      dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'strategicError' });
+    // Strategic error becomes a one-shot toast instead of a blocking modal.
+    // Showing it only once per game keeps it feeling like a tip, not a nag.
+    if (result.isStrategicError && !state.strategicWarningShown) {
+      dispatch({ type: GAME_ACTIONS.SHOW_STRATEGIC_WARNING });
     }
-  }, [dispatch, state.gridSize, state.gameMode, state.moveCount, state.timeRemaining, trigger]);
+  }, [dispatch, state.gridSize, state.gameMode, state.moveCount, state.timeRemaining, state.strategicWarningShown, trigger]);
 };
 
 // Persistence — lives only in root GridZen2 component
@@ -526,8 +546,7 @@ const useGameAudio = (gamePhase, musicEnabled) => {
     if (music) { try { music.loop = true; } catch { } }
   }, [music]);
 
-  const shouldPlay = musicEnabled &&
-    (gamePhase === 'playing' || gamePhase === 'strategicError');
+  const shouldPlay = musicEnabled && gamePhase === 'playing';
 
   useEffect(() => {
     if (!music) return;
@@ -726,7 +745,7 @@ const GameGrid = ({ state, dispatch, theme, evaluate }) => {
   }, [dispatch, state.gridData, state.freeMovesRemaining, state.completedRows, trigger, evaluate]);
 
   const onSwipe = useCallback((index, direction) => {
-    if (state.gamePhase !== 'playing' && state.gamePhase !== 'strategicError') return;
+    if (state.gamePhase !== 'playing') return;
     if (state.lockedTiles.has(index)) return;
 
     const row = Math.floor(index / state.gridSize);
@@ -803,6 +822,113 @@ const ToggleChip = ({ onPress, label, chipBg, chipText }) => (
     <Text style={[styles.toggleChipText, { color: chipText }]}>{label}</Text>
   </TouchableOpacity>
 );
+
+// ============================================================================
+// Result Overlay — replaces native Alert.alert on win/loss with an in-app
+// view so the moment matches the game's tone, shows actual stats, and gives
+// a direct "Play Again" CTA. Player loses the worst part of native modals
+// (looks like an error, blocks taps until dismissed, no styling).
+// ============================================================================
+const ResultOverlay = ({ visible, kind, moves, time, rowsCompleted, totalRows, onPlayAgain, onMenu, accentGradient }) => {
+  const fade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(fade, {
+      toValue: visible ? 1 : 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [visible, fade]);
+
+  if (!visible) return null;
+  const isWin = kind === 'won';
+
+  return (
+    <Animated.View
+      style={[styles.overlay, { opacity: fade }]}
+      pointerEvents={visible ? 'auto' : 'none'}
+    >
+      <View style={styles.overlayCard}>
+        <LinearGradient
+          colors={accentGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.overlayHeader}
+        >
+          <Text style={styles.overlayTitle}>
+            {isWin ? 'Solved' : "Time's up"}
+          </Text>
+          <Text style={styles.overlaySubtitle}>
+            {isWin ? 'Nice work — every row complete.' : 'So close. Want another shot?'}
+          </Text>
+        </LinearGradient>
+
+        <View style={styles.overlayStats}>
+          <View style={styles.overlayStatCol}>
+            <Text style={styles.overlayStatValue}>{moves}</Text>
+            <Text style={styles.overlayStatLabel}>Moves</Text>
+          </View>
+          <View style={styles.overlayStatDivider} />
+          <View style={styles.overlayStatCol}>
+            <Text style={styles.overlayStatValue}>{time}s</Text>
+            <Text style={styles.overlayStatLabel}>{isWin ? 'Time used' : 'Time left'}</Text>
+          </View>
+          <View style={styles.overlayStatDivider} />
+          <View style={styles.overlayStatCol}>
+            <Text style={styles.overlayStatValue}>{rowsCompleted}/{totalRows}</Text>
+            <Text style={styles.overlayStatLabel}>Rows</Text>
+          </View>
+        </View>
+
+        <TouchableOpacity style={styles.overlayPrimary} onPress={onPlayAgain}>
+          <Text style={styles.overlayPrimaryText}>Play Again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.overlaySecondary} onPress={onMenu}>
+          <Text style={styles.overlaySecondaryText}>Back to Menu</Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+};
+
+// Non-blocking strategic warning toast. Shows once per game when the player
+// completes a middle row before the rows below it, fades after 3s. Prior
+// implementation used Alert.alert which paused the game and felt punitive.
+const StrategicWarningToast = ({ visible, onDismiss, topInset }) => {
+  const slide = useRef(new Animated.Value(-80)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.timing(slide, { toValue: 0, duration: 220, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+      const t = setTimeout(onDismiss, 3000);
+      return () => clearTimeout(t);
+    } else {
+      Animated.parallel([
+        Animated.timing(slide, { toValue: -80, duration: 200, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible, slide, opacity, onDismiss]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.toast,
+        { top: topInset + 8, transform: [{ translateY: slide }], opacity },
+      ]}
+    >
+      <Text style={styles.toastIcon}>⚠</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.toastTitle}>Try working top-down</Text>
+        <Text style={styles.toastBody}>Skipping a row makes it harder to finish.</Text>
+      </View>
+    </Animated.View>
+  );
+};
 
 // ============================================================================
 // GameScreen
@@ -975,13 +1101,43 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
     dispatch({ type: GAME_ACTIONS.SET_MUSIC_ENABLED, payload: !state.musicEnabled });
   }, [dispatch, state.musicEnabled]);
 
+  const quitToMenu = useCallback(() => {
+    dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' });
+  }, [dispatch]);
+
+  const playAgain = useCallback(() => {
+    const gridData = createGridData(state.gridSize, state.gameMode, true);
+    dispatch({ type: GAME_ACTIONS.SET_GRID_DATA, payload: gridData });
+    dispatch({ type: GAME_ACTIONS.START_NEW_GAME });
+    dispatch({ type: GAME_ACTIONS.SET_TIME, payload: TIME_FOR_SIZE[state.gridSize] || 60 });
+  }, [dispatch, state.gridSize, state.gameMode]);
+
+  const dismissStrategicWarning = useCallback(() => {
+    dispatch({ type: GAME_ACTIONS.HIDE_STRATEGIC_WARNING });
+  }, [dispatch]);
+
+  const showResultOverlay = state.gamePhase === 'won' || state.gamePhase === 'gameOver';
+  const initialTime = TIME_FOR_SIZE[state.gridSize] || 60;
+  const timeStat = state.gamePhase === 'won'
+    ? initialTime - state.timeRemaining
+    : state.timeRemaining;
+
   return (
     <View style={[styles.gameContainer, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={state.isDarkTheme ? 'light-content' : 'dark-content'} />
 
-      {/* Banner */}
+      {/* Top bar: banner + quit X */}
       <View style={[styles.bannerContainer, { paddingTop: Math.max(8, insets.top + 4) }]}>
         <Image source={require('./assets/images/gridzen2.png')} style={styles.gameBanner} resizeMode="contain" />
+        <TouchableOpacity
+          onPress={quitToMenu}
+          style={[styles.quitButton, { top: Math.max(8, insets.top + 4) }]}
+          hitSlop={{ top: 12, left: 12, right: 12, bottom: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="Quit round"
+        >
+          <Text style={[styles.quitButtonText, { color: theme.text }]}>✕</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Theme + Music toggles */}
@@ -1000,11 +1156,22 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
         />
       </View>
 
-      {/* Header */}
+      {/* Header: time hero, moves and rows secondary */}
       <View style={styles.gameHeader}>
-        <Text style={[styles.gameHeaderText, { color: theme.text }]}>Moves: {state.moveCount}</Text>
-        <Text style={[styles.gameHeaderText, { color: theme.text }]}>Time: {state.timeRemaining}s</Text>
-        <Text style={[styles.gameHeaderText, { color: theme.text }]}>Rows: {state.completedRows.size}/{state.gridSize}</Text>
+        <View style={styles.headerColSecondary}>
+          <Text style={[styles.headerStatLabel, { color: theme.subText }]}>MOVES</Text>
+          <Text style={[styles.headerStatValueSm, { color: theme.text }]}>{state.moveCount}</Text>
+        </View>
+        <View style={styles.headerColPrimary}>
+          <Text style={[styles.headerStatLabel, { color: theme.subText }]}>TIME</Text>
+          <Text style={[styles.headerStatValueLg, { color: theme.text }]}>{state.timeRemaining}s</Text>
+        </View>
+        <View style={styles.headerColSecondary}>
+          <Text style={[styles.headerStatLabel, { color: theme.subText }]}>ROWS</Text>
+          <Text style={[styles.headerStatValueSm, { color: theme.text }]}>
+            {state.completedRows.size}/{state.gridSize}
+          </Text>
+        </View>
       </View>
 
       {/* Grid */}
@@ -1012,16 +1179,6 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
 
       {/* Power-ups */}
       <PowerUpDisplay powerUps={state.availablePowerUps} onUse={handleUsePowerUp} theme={theme} />
-
-      {/* Controls */}
-      <View style={styles.gameControls}>
-        <TouchableOpacity
-          style={[styles.controlButton, { backgroundColor: theme.button }]}
-          onPress={() => dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' })}
-        >
-          <Text style={[styles.controlButtonText, { color: theme.buttonText }]}>Give Up</Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Ads — hidden when ad-free */}
       {!isAdFree && (
@@ -1039,6 +1196,24 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
       )}
 
       <ConfettiCannon ref={confettiRef} count={120} origin={{ x: SCREEN_WIDTH / 2, y: 0 }} autoStart={false} fadeOut />
+
+      <StrategicWarningToast
+        visible={state.strategicWarningVisible}
+        onDismiss={dismissStrategicWarning}
+        topInset={insets.top}
+      />
+
+      <ResultOverlay
+        visible={showResultOverlay}
+        kind={state.gamePhase}
+        moves={state.moveCount}
+        time={timeStat}
+        rowsCompleted={state.completedRows.size}
+        totalRows={state.gridSize}
+        onPlayAgain={playAgain}
+        onMenu={quitToMenu}
+        accentGradient={gradientForMode(state.gameMode)}
+      />
     </View>
   );
 };
@@ -1053,7 +1228,7 @@ const MenuScreen = ({ state, dispatch, isAdFree, onPurchase, onRestore, isPurcha
     const gridData = createGridData(state.gridSize, state.gameMode, true);
     dispatch({ type: GAME_ACTIONS.SET_GRID_DATA, payload: gridData });
     dispatch({ type: GAME_ACTIONS.START_NEW_GAME });
-    dispatch({ type: GAME_ACTIONS.SET_TIME, payload: 60 });
+    dispatch({ type: GAME_ACTIONS.SET_TIME, payload: TIME_FOR_SIZE[state.gridSize] || 60 });
   }, [state.gridSize, state.gameMode, dispatch]);
 
   const toggleTheme = useCallback(() => {
@@ -1171,7 +1346,6 @@ const MenuScreen = ({ state, dispatch, isAdFree, onPurchase, onRestore, isPurcha
 // ============================================================================
 const GridZen2 = () => {
   const [state, dispatch] = useReducer(gameStateReducer, INITIAL_STATE);
-  const alertShownRef = useRef(false);
 
   // RevenueCat state
   const [isAdFree, setIsAdFree] = useState(false);
@@ -1257,70 +1431,16 @@ const GridZen2 = () => {
   useGameAudio(state.gamePhase, state.musicEnabled);
   useRatingPrompt(state.gamePhase);
 
-  useEffect(() => {
-    if (state.gamePhase === 'menu' || state.gamePhase === 'playing') alertShownRef.current = false;
-  }, [state.gamePhase]);
-
-  useEffect(() => {
-    if (state.gamePhase === 'won' && !alertShownRef.current) {
-      alertShownRef.current = true;
-      setTimeout(() => {
-        Alert.alert('Congratulations!', `You won in ${state.moveCount} moves!`, [
-          { text: 'OK', onPress: () => { alertShownRef.current = false; dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' }); } }
-        ]);
-      }, 250);
-    } else if (state.gamePhase === 'gameOver' && !alertShownRef.current) {
-      alertShownRef.current = true;
-      setTimeout(() => {
-        Alert.alert('Game Over', "Time's up! Try again.", [
-          { text: 'OK', onPress: () => { alertShownRef.current = false; dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' }); } }
-        ]);
-      }, 250);
-    } else if (state.gamePhase === 'strategicError' && !alertShownRef.current) {
-      alertShownRef.current = true;
-      setTimeout(() => {
-        Alert.alert(
-          'Strategic Warning',
-          'You completed a middle row before finishing the rows below it.\nTip: avoid skipping rows; complete contiguous rows.',
-          [
-            { text: 'Keep Looking' },
-            { text: 'Give Up Now', style: 'destructive', onPress: () => { alertShownRef.current = false; dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' }); } }
-          ]
-        );
-      }, 250);
-    }
-  }, [state.gamePhase, state.moveCount, dispatch]);
-
   const renderCurrent = () => {
+    // 'won' and 'gameOver' keep the GameScreen mounted so the ResultOverlay
+    // renders on top of the final grid state rather than blink-cutting back
+    // to the menu.
     switch (state.gamePhase) {
-      case 'menu':
-        return (
-          <MenuScreen
-            state={state}
-            dispatch={dispatch}
-            isAdFree={isAdFree}
-            onPurchase={handlePurchase}
-            onRestore={handleRestore}
-            isPurchasing={isPurchasing}
-            isRestoring={isRestoring}
-          />
-        );
       case 'playing':
-      case 'strategicError':
-        return <GameScreen state={state} dispatch={dispatch} isAdFree={isAdFree} />;
       case 'won':
       case 'gameOver':
-        return (
-          <MenuScreen
-            state={state}
-            dispatch={dispatch}
-            isAdFree={isAdFree}
-            onPurchase={handlePurchase}
-            onRestore={handleRestore}
-            isPurchasing={isPurchasing}
-            isRestoring={isRestoring}
-          />
-        );
+        return <GameScreen state={state} dispatch={dispatch} isAdFree={isAdFree} />;
+      case 'menu':
       default:
         return (
           <MenuScreen
@@ -1366,8 +1486,24 @@ const styles = StyleSheet.create({
   toggleChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
   toggleChipText: { fontWeight: '600', fontSize: 12 },
 
-  gameHeader: { flexDirection: 'row', justifyContent: 'space-around', padding: 12, marginTop: 4 },
-  gameHeaderText: { fontSize: 16, fontWeight: 'bold' },
+  gameHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingHorizontal: 20, paddingVertical: 10, marginTop: 4 },
+  headerColPrimary: { alignItems: 'center', flex: 1.4 },
+  headerColSecondary: { alignItems: 'center', flex: 1 },
+  headerStatLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 1.2, marginBottom: 2 },
+  headerStatValueLg: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
+  headerStatValueSm: { fontSize: 18, fontWeight: '700' },
+
+  quitButton: {
+    position: 'absolute',
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(127,127,127,0.12)',
+  },
+  quitButtonText: { fontSize: 18, fontWeight: '600' },
 
   gridContainer: { alignItems: 'center', marginBottom: 16 },
   gridFlex: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' },
@@ -1378,10 +1514,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
     borderColor: '#ffffff',
     borderWidth: 1
   },
@@ -1396,10 +1532,6 @@ const styles = StyleSheet.create({
   powerUpChip: { backgroundColor: '#4CAF50', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginHorizontal: 5 },
   powerUpIcon: { fontSize: 16, marginRight: 5 },
   powerUpName: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
-
-  gameControls: { alignItems: 'center', marginBottom: 80 },
-  controlButton: { padding: 12, borderRadius: 10, minWidth: 100 },
-  controlButtonText: { fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
 
   adContainerFixed: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -1455,4 +1587,65 @@ const styles = StyleSheet.create({
   restoreText: { color: 'rgba(255,255,255,0.7)', fontSize: 14 },
 
   buttonDisabled: { opacity: 0.5 },
+
+  toast: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20,20,28,0.94)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 50,
+  },
+  toastIcon: { fontSize: 20, marginRight: 10, color: '#FFD400' },
+  toastTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  toastBody: { color: 'rgba(255,255,255,0.78)', fontSize: 12, marginTop: 2 },
+
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 100,
+  },
+  overlayCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#15151a',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  overlayHeader: { paddingVertical: 26, paddingHorizontal: 22, alignItems: 'center' },
+  overlayTitle: { color: '#fff', fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  overlaySubtitle: { color: 'rgba(255,255,255,0.88)', fontSize: 14, marginTop: 4, textAlign: 'center' },
+  overlayStats: { flexDirection: 'row', paddingVertical: 18, paddingHorizontal: 12, alignItems: 'center' },
+  overlayStatCol: { flex: 1, alignItems: 'center' },
+  overlayStatDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.12)' },
+  overlayStatValue: { color: '#fff', fontSize: 22, fontWeight: '700' },
+  overlayStatLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 2, letterSpacing: 1 },
+  overlayPrimary: {
+    marginHorizontal: 16,
+    marginTop: 4,
+    backgroundColor: '#4CAF50',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  overlayPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  overlaySecondary: { paddingVertical: 14, alignItems: 'center', marginBottom: 4 },
+  overlaySecondaryText: { color: 'rgba(255,255,255,0.65)', fontSize: 14, fontWeight: '500' },
 });
