@@ -2,7 +2,7 @@
   "expo": {
     "name": "GridZen 2",
     "slug": "gridzen2",
-    "version": "2.0.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/playstore.png",
     "userInterfaceStyle": "automatic",
@@ -20,9 +20,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
-      "buildNumber": "1",
+      "buildNumber": "6",
+      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [],
         "SKAdNetworkItems": [
           {
             "SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork"
@@ -32,22 +34,34 @@
     },
     "android": {
       "package": "com.steveomatic.gridzen2",
-      "versionCode": 1,
+      "versionCode": 6,
+      "compileSdkVersion": 35,
+      "targetSdkVersion": 35,
+      "buildToolsVersion": "35.0.0",
       "edgeToEdgeEnabled": true,
+      "googleMobileAdsAppId": "ca-app-pub-7368779159802085~6120308292",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/playstore.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "com.google.android.gms.permission.AD_ID"
       ]
     },
     "web": {
       "favicon": "./assets/images/playstore.png"
     },
     "plugins": [
-      "expo-system-ui"
+      "expo-system-ui",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-7368779159802085~6120308292",
+          "iosAppId": "ca-app-pub-7368779159802085~2981633317"
+        }
+      ]
     ],
     "extra": {
       "eas": {
@@ -56,7 +70,19 @@
     },
     "owner": "armyrunne9916",
     "description": "GridZen 2 - Revolutionary number tile puzzle game with 3D textured tiles, row completion mechanics, gesture controls, and advanced power-up system. Features FlatList-based grid engine and custom animated panels.",
-    "keywords": ["puzzle", "tiles", "numbers", "brain", "challenge", "grid", "zen", "power-ups", "3d", "gestures", "row-completion"],
+    "keywords": [
+      "puzzle",
+      "tiles",
+      "numbers",
+      "brain",
+      "challenge",
+      "grid",
+      "zen",
+      "power-ups",
+      "3d",
+      "gestures",
+      "row-completion"
+    ],
     "category": "games"
   }
 }

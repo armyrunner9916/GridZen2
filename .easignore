@@ -1,0 +1,5 @@
+# Ignore screenshots folder completely
+new-screenshots/
+
+# Ignore macOS junk files
+.DS_Store

@@ -26,6 +26,10 @@
       "ios": {
         "appleId": "steveomatic1977@gmail.com",
         "ascAppId": "6749806311"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./android-service-account.json",
+        "track": "production"
       }
     }
   }
