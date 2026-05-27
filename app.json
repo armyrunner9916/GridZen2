@@ -2,7 +2,7 @@
   "expo": {
     "name": "GridZen 2",
     "slug": "gridzen2",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/playstore.png",
     "userInterfaceStyle": "automatic",
@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.steveomatic.gridzen2",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "googleMobileAdsAppId": "ca-app-pub-7368779159802085~2981633317",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "com.steveomatic.gridzen2",
-      "versionCode": 6,
+      "versionCode": 7,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "buildToolsVersion": "35.0.0",
@@ -61,7 +61,9 @@
           "androidAppId": "ca-app-pub-7368779159802085~6120308292",
           "iosAppId": "ca-app-pub-7368779159802085~2981633317"
         }
-      ]
+      ],
+      "react-native-edge-to-edge",
+      "./plugins/with-large-screen.js"
     ],
     "extra": {
       "eas": {

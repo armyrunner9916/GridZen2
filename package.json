@@ -25,7 +25,8 @@
     "react-native-purchases": "^7.13.0",
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
-    "expo-store-review": "~8.1.5"
+    "expo-store-review": "~8.1.5",
+    "react-native-edge-to-edge": "1.6.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
