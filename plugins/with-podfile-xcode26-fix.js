@@ -29,6 +29,13 @@ const POST_INSTALL_BLOCK = `
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+        config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+        config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
+      end
+      target.build_phases.each do |phase|
+        if phase.respond_to?(:always_out_of_date)
+          phase.always_out_of_date = '1'
+        end
       end
     end
 
@@ -47,6 +54,30 @@ const POST_INSTALL_BLOCK = `
           puts '[xcode26-fmt-patch] Patched fmt/base.h to disable consteval.'
         else
           puts '[xcode26-fmt-patch] WARNING: detection block not found in fmt/base.h.'
+        end
+      end
+    end
+
+    rc_hybrid = File.join(
+      installer.sandbox.root,
+      'PurchasesHybridCommon', 'ios', 'PurchasesHybridCommon',
+      'PurchasesHybridCommon', 'StoreProduct+HybridAdditions.swift'
+    )
+    if File.exist?(rc_hybrid)
+      original = File.read(rc_hybrid)
+      patch_marker = '/* xcode26-rc-subscription-period-patch */'
+      unless original.include?(patch_marker)
+        patched = original
+          .sub('subscriptionPeriod: SubscriptionPeriod)',
+               'subscriptionPeriod: RevenueCat.SubscriptionPeriod)')
+          .sub('subscriptionPeriodUnit: SubscriptionPeriod.Unit)',
+               'subscriptionPeriodUnit: RevenueCat.SubscriptionPeriod.Unit)')
+        if patched != original
+          File.chmod(0644, rc_hybrid) rescue nil
+          File.write(rc_hybrid, "// #{patch_marker}\\n" + patched)
+          puts '[xcode26-rc-patch] Qualified SubscriptionPeriod as RevenueCat.SubscriptionPeriod.'
+        else
+          puts '[xcode26-rc-patch] WARNING: SubscriptionPeriod call sites not found.'
         end
       end
     end
