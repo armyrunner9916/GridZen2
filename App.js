@@ -901,6 +901,39 @@ const ResultOverlay = ({ visible, kind, moves, time, rowsCompleted, totalRows, o
   );
 };
 
+// Give-up confirmation. Same visual family as ResultOverlay so the win/loss
+// and quit moments share a consistent vocabulary, but with a green Return
+// and red Give Up pill so the colors carry the choice direction.
+const GiveUpConfirmOverlay = ({ visible, onCancel, onConfirm }) => {
+  const fade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(fade, {
+      toValue: visible ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [visible, fade]);
+
+  if (!visible) return null;
+
+  return (
+    <Animated.View style={[styles.overlay, { opacity: fade }]} pointerEvents="auto">
+      <View style={styles.confirmCard}>
+        <Text style={styles.confirmTitle}>Are you sure?</Text>
+        <Text style={styles.confirmBody}>
+          You'll lose your progress and return to the menu.
+        </Text>
+        <TouchableOpacity style={styles.confirmPrimary} onPress={onCancel}>
+          <Text style={styles.confirmPrimaryText}>Return to Game</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.confirmDestructive} onPress={onConfirm}>
+          <Text style={styles.confirmDestructiveText}>Give Up</Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+};
+
 // Non-blocking strategic warning toast. Shows once per game when the player
 // completes a middle row before the rows below it, fades after 3s. Prior
 // implementation used Alert.alert which paused the game and felt punitive.
@@ -951,6 +984,7 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
   const insets = useSafeAreaInsets();
   const theme = useMemo(() => makeTheme(state.isDarkTheme), [state.isDarkTheme]);
   const evaluate = useGameEvaluation(state, dispatch, trigger);
+  const [giveUpConfirmVisible, setGiveUpConfirmVisible] = useState(false);
 
   useGameTimer(state, dispatch);
 
@@ -1116,21 +1150,22 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
     dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' });
   }, [dispatch]);
 
-  // Give Up shows a confirmation; the post-game ResultOverlay's
-  // "Back to Menu" calls quitToMenu directly because there's nothing
-  // left to abandon at that point.
-  const confirmGiveUp = useCallback(() => {
+  // Give Up shows a custom confirm overlay; the post-game ResultOverlay's
+  // "Back to Menu" calls quitToMenu directly because there's nothing left
+  // to abandon at that point.
+  const openGiveUpConfirm = useCallback(() => {
     trigger('light');
-    Alert.alert(
-      'Give up this round?',
-      "You'll lose your progress and return to the menu.",
-      [
-        { text: 'Keep Playing', style: 'cancel' },
-        { text: 'Give Up', style: 'destructive', onPress: quitToMenu },
-      ],
-      { cancelable: true }
-    );
-  }, [quitToMenu, trigger]);
+    setGiveUpConfirmVisible(true);
+  }, [trigger]);
+
+  const cancelGiveUp = useCallback(() => {
+    setGiveUpConfirmVisible(false);
+  }, []);
+
+  const acceptGiveUp = useCallback(() => {
+    setGiveUpConfirmVisible(false);
+    quitToMenu();
+  }, [quitToMenu]);
 
   const playAgain = useCallback(() => {
     const gridData = createGridData(state.gridSize, state.gameMode, true);
@@ -1204,7 +1239,7 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
           so it clears both the ad and the iOS home indicator. */}
       <View style={[styles.giveUpRow, { marginBottom: 70 + insets.bottom }]}>
         <TouchableOpacity
-          onPress={confirmGiveUp}
+          onPress={openGiveUpConfirm}
           style={styles.giveUpButton}
           accessibilityRole="button"
           accessibilityLabel="Give up and return to menu"
@@ -1234,6 +1269,12 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
         visible={state.strategicWarningVisible}
         onDismiss={dismissStrategicWarning}
         topInset={insets.top}
+      />
+
+      <GiveUpConfirmOverlay
+        visible={giveUpConfirmVisible}
+        onCancel={cancelGiveUp}
+        onConfirm={acceptGiveUp}
       />
 
       <ResultOverlay
@@ -1691,4 +1732,45 @@ const styles = StyleSheet.create({
   overlayPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   overlaySecondary: { paddingVertical: 14, alignItems: 'center', marginBottom: 4 },
   overlaySecondaryText: { color: 'rgba(255,255,255,0.65)', fontSize: 14, fontWeight: '500' },
+
+  confirmCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#15151a',
+    borderRadius: 20,
+    paddingVertical: 26,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  confirmTitle: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  confirmBody: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 22,
+    lineHeight: 20,
+  },
+  confirmPrimary: {
+    width: '100%',
+    backgroundColor: '#34C759',
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  confirmPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  confirmDestructive: {
+    width: '100%',
+    backgroundColor: '#FF3B30',
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  confirmDestructiveText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
