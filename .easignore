@@ -1,5 +1,45 @@
-# Ignore screenshots folder completely
-new-screenshots/
+# EAS Build uses .easignore INSTEAD of .gitignore when present, not in
+# addition to it. So this file must include everything .gitignore would
+# normally hide, plus EAS-only extras. Keeping the project archive small
+# means much faster uploads (the prior minimal version was uploading 1.3 GB).
 
-# Ignore macOS junk files
+# --- Dependencies (EAS reinstalls these on its servers) ---
+node_modules/
+
+# --- Native project folders (EAS regenerates via expo prebuild) ---
+ios/
+android/
+
+# --- Expo / Metro caches ---
+.expo/
+
+# --- Env files (never upload secrets) ---
+.env
+.env.local
+
+# --- Web build output ---
+web-build/
+dist/
+
+# --- Signing material (never upload — EAS manages credentials separately) ---
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+
+# --- Misc backups / debug ---
+*.orig.*
+npm-debug.*
+
+# --- macOS junk ---
 .DS_Store
+
+# --- Repo-only assets and notes (not needed at build time) ---
+new-screenshots/
+AdMob Implementation/
+AppIcons/
+
+# --- Local planning / scratch ---
+.planning/
