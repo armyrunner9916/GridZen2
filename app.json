@@ -63,7 +63,8 @@
         }
       ],
       "react-native-edge-to-edge",
-      "./plugins/with-large-screen.js"
+      "./plugins/with-large-screen.js",
+      "./plugins/with-podfile-xcode26-fix.js"
     ],
     "extra": {
       "eas": {
