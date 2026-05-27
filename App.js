@@ -1137,22 +1137,9 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
     <View style={[styles.gameContainer, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={state.isDarkTheme ? 'light-content' : 'dark-content'} />
 
-      {/* Dedicated top bar row — quit X right-aligned with its own space,
-          so it never collides with the banner or its rainbow gradient. */}
-      <View style={[styles.topBar, { paddingTop: Math.max(8, insets.top + 4) }]}>
-        <TouchableOpacity
-          onPress={quitToMenu}
-          style={[styles.quitButton, { backgroundColor: theme.chipBg }]}
-          hitSlop={{ top: 12, left: 12, right: 12, bottom: 12 }}
-          accessibilityRole="button"
-          accessibilityLabel="Quit round"
-        >
-          <Text style={[styles.quitButtonText, { color: theme.text }]}>✕</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Banner */}
-      <View style={styles.bannerContainer}>
+      {/* Banner — paddingTop respects the safe-area top inset directly,
+          since there's no longer a separate top-bar row above it. */}
+      <View style={[styles.bannerContainer, { paddingTop: Math.max(8, insets.top + 4) }]}>
         <Image source={require('./assets/images/gridzen2.png')} style={styles.gameBanner} resizeMode="contain" />
       </View>
 
@@ -1195,6 +1182,20 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
 
       {/* Power-ups */}
       <PowerUpDisplay powerUps={state.availablePowerUps} onUse={handleUsePowerUp} theme={theme} />
+
+      {/* Give Up — explicit destructive action below the board. Sits above
+          the absolute-positioned ad container with enough bottom margin
+          so it clears both the ad and the iOS home indicator. */}
+      <View style={[styles.giveUpRow, { marginBottom: 70 + insets.bottom }]}>
+        <TouchableOpacity
+          onPress={quitToMenu}
+          style={styles.giveUpButton}
+          accessibilityRole="button"
+          accessibilityLabel="Give up and return to menu"
+        >
+          <Text style={styles.giveUpButtonText}>Give Up</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Ads — hidden when ad-free */}
       {!isAdFree && (
@@ -1509,20 +1510,27 @@ const styles = StyleSheet.create({
   headerStatValueLg: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
   headerStatValueSm: { fontSize: 18, fontWeight: '700' },
 
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  quitButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  giveUpRow: {
     alignItems: 'center',
-    justifyContent: 'center',
+    marginTop: 12,
   },
-  quitButtonText: { fontSize: 18, fontWeight: '600' },
+  giveUpButton: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  giveUpButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
 
   gridContainer: { alignItems: 'center', marginBottom: 16 },
   gridFlex: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' },
