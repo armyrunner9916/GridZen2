@@ -22,6 +22,7 @@ import * as Haptics from 'expo-haptics';
 import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAudioPlayer } from 'expo-audio';
+import * as StoreReview from 'expo-store-review';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 
 /**
@@ -512,32 +513,102 @@ const usePersistence = (state, dispatch) => {
 };
 
 // ============================================================================
-// Zen Music Hook
+// Game Audio — looping zen music + one-shot SFX. Returns a play(name) callback
+// so the rest of the app can fire 'cheer' on win and 'gameover' on time-up
+// without each component owning its own audio player.
 // ============================================================================
-const useZenMusic = (gamePhase, musicEnabled) => {
-  const player = useAudioPlayer(require('./assets/sounds/zen-sound.mp3'));
+const useGameAudio = (gamePhase, musicEnabled) => {
+  const music = useAudioPlayer(require('./assets/sounds/zen-sound.mp3'));
+  const cheer = useAudioPlayer(require('./assets/sounds/Cheer.mp3'));
+  const gameOver = useAudioPlayer(require('./assets/sounds/Game_over.mp3'));
 
   useEffect(() => {
-    if (player) {
-      try { player.loop = true; } catch { }
-    }
-  }, [player]);
+    if (music) { try { music.loop = true; } catch { } }
+  }, [music]);
 
   const shouldPlay = musicEnabled &&
     (gamePhase === 'playing' || gamePhase === 'strategicError');
 
   useEffect(() => {
-    if (!player) return;
+    if (!music) return;
     try {
-      if (shouldPlay) {
-        if (!player.playing) player.play();
-      } else {
-        if (player.playing) player.pause();
-      }
-    } catch (e) {
-      console.log('Music control error:', e);
+      if (shouldPlay) { if (!music.playing) music.play(); }
+      else { if (music.playing) music.pause(); }
+    } catch (e) { console.log('Music control error:', e); }
+  }, [shouldPlay, music]);
+
+  // Fire one-shot SFX on win/loss. Guarded so we don't double-trigger on
+  // re-renders while the phase is held.
+  const sfxFiredRef = useRef(null);
+  useEffect(() => {
+    if (gamePhase !== 'won' && gamePhase !== 'gameOver') {
+      sfxFiredRef.current = null;
+      return;
     }
-  }, [shouldPlay, player]);
+    if (sfxFiredRef.current === gamePhase) return;
+    sfxFiredRef.current = gamePhase;
+    const target = gamePhase === 'won' ? cheer : gameOver;
+    if (!target) return;
+    try {
+      target.seekTo?.(0);
+      target.play();
+    } catch (e) { console.log('SFX error:', e); }
+  }, [gamePhase, cheer, gameOver]);
+};
+
+// ============================================================================
+// Rating Prompt — Apple/Google both rate-limit the OS prompt, so we layer
+// our own checks on top so a player only sees it after they're invested:
+//   * at least 5 lifetime wins
+//   * at least 2 days since install
+//   * at least 60 days since last prompt
+//   * triggered only on a 'won' phase (emotional peak)
+// Wrapping with hasAction()/isAvailableAsync() avoids crashes on platforms
+// where review APIs aren't available.
+// ============================================================================
+const RATING_STORAGE_KEY = 'gridzen2_rating_v1';
+const useRatingPrompt = (gamePhase) => {
+  const askedThisSessionRef = useRef(false);
+  useEffect(() => {
+    if (gamePhase !== 'won') return;
+    if (askedThisSessionRef.current) return;
+
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(RATING_STORAGE_KEY);
+        const data = raw
+          ? JSON.parse(raw)
+          : { gamesWon: 0, installedAt: Date.now(), lastPromptedAt: 0 };
+        data.gamesWon = (data.gamesWon || 0) + 1;
+
+        const daysSinceInstall = (Date.now() - (data.installedAt || Date.now())) / 86400000;
+        const daysSincePrompt = (Date.now() - (data.lastPromptedAt || 0)) / 86400000;
+
+        let canPrompt = false;
+        try {
+          const hasAction = await StoreReview.hasAction();
+          const isAvailable = await StoreReview.isAvailableAsync();
+          canPrompt = hasAction && isAvailable;
+        } catch { canPrompt = false; }
+
+        const shouldAsk =
+          data.gamesWon >= 5 &&
+          daysSinceInstall >= 2 &&
+          daysSincePrompt >= 60 &&
+          canPrompt;
+
+        if (shouldAsk) {
+          askedThisSessionRef.current = true;
+          data.lastPromptedAt = Date.now();
+          // Delay so the win overlay/confetti has a moment to land first.
+          setTimeout(() => {
+            StoreReview.requestReview().catch(() => { });
+          }, 1800);
+        }
+        await AsyncStorage.setItem(RATING_STORAGE_KEY, JSON.stringify(data));
+      } catch (e) { console.log('Rating prompt error:', e); }
+    })();
+  }, [gamePhase]);
 };
 
 // ============================================================================
@@ -1180,9 +1251,11 @@ const GridZen2 = () => {
     }
   }, []);
 
-  // Both persistence and music live here at the root — single instances
+  // Persistence, audio, and rating prompt all live at the root so they exist
+  // exactly once.
   usePersistence(state, dispatch);
-  useZenMusic(state.gamePhase, state.musicEnabled);
+  useGameAudio(state.gamePhase, state.musicEnabled);
+  useRatingPrompt(state.gamePhase);
 
   useEffect(() => {
     if (state.gamePhase === 'menu' || state.gamePhase === 'playing') alertShownRef.current = false;
