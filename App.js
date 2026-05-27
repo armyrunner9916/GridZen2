@@ -21,7 +21,7 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import * as Haptics from 'expo-haptics';
 import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAudioPlayer } from 'expo-audio';
+import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as StoreReview from 'expo-store-review';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 
@@ -541,6 +541,17 @@ const useGameAudio = (gamePhase, musicEnabled) => {
   const music = useAudioPlayer(require('./assets/sounds/zen-sound.mp3'));
   const cheer = useAudioPlayer(require('./assets/sounds/Cheer.mp3'));
   const gameOver = useAudioPlayer(require('./assets/sounds/Game_over.mp3'));
+
+  // iOS defaults audio to "ambient" — which silences playback when the
+  // physical silent switch is on. For a casual puzzle game, the zen track
+  // should still play with the ringer muted (matches Apple's own games).
+  // Also unblocks audio in the iOS Simulator, which routes ambient audio
+  // through host channels that often appear muted.
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true }).catch((e) =>
+      console.log('setAudioMode error:', e)
+    );
+  }, []);
 
   useEffect(() => {
     if (music) { try { music.loop = true; } catch { } }
@@ -1126,18 +1137,23 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
     <View style={[styles.gameContainer, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={state.isDarkTheme ? 'light-content' : 'dark-content'} />
 
-      {/* Top bar: banner + quit X */}
-      <View style={[styles.bannerContainer, { paddingTop: Math.max(8, insets.top + 4) }]}>
-        <Image source={require('./assets/images/gridzen2.png')} style={styles.gameBanner} resizeMode="contain" />
+      {/* Dedicated top bar row — quit X right-aligned with its own space,
+          so it never collides with the banner or its rainbow gradient. */}
+      <View style={[styles.topBar, { paddingTop: Math.max(8, insets.top + 4) }]}>
         <TouchableOpacity
           onPress={quitToMenu}
-          style={[styles.quitButton, { top: Math.max(8, insets.top + 4) }]}
+          style={[styles.quitButton, { backgroundColor: theme.chipBg }]}
           hitSlop={{ top: 12, left: 12, right: 12, bottom: 12 }}
           accessibilityRole="button"
           accessibilityLabel="Quit round"
         >
           <Text style={[styles.quitButtonText, { color: theme.text }]}>✕</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Banner */}
+      <View style={styles.bannerContainer}>
+        <Image source={require('./assets/images/gridzen2.png')} style={styles.gameBanner} resizeMode="contain" />
       </View>
 
       {/* Theme + Music toggles */}
@@ -1493,15 +1509,18 @@ const styles = StyleSheet.create({
   headerStatValueLg: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
   headerStatValueSm: { fontSize: 18, fontWeight: '700' },
 
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
   quitButton: {
-    position: 'absolute',
-    right: 16,
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(127,127,127,0.12)',
   },
   quitButtonText: { fontSize: 18, fontWeight: '600' },
 
