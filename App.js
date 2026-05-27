@@ -1116,6 +1116,22 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
     dispatch({ type: GAME_ACTIONS.SET_GAME_PHASE, payload: 'menu' });
   }, [dispatch]);
 
+  // Give Up shows a confirmation; the post-game ResultOverlay's
+  // "Back to Menu" calls quitToMenu directly because there's nothing
+  // left to abandon at that point.
+  const confirmGiveUp = useCallback(() => {
+    trigger('light');
+    Alert.alert(
+      'Give up this round?',
+      "You'll lose your progress and return to the menu.",
+      [
+        { text: 'Keep Playing', style: 'cancel' },
+        { text: 'Give Up', style: 'destructive', onPress: quitToMenu },
+      ],
+      { cancelable: true }
+    );
+  }, [quitToMenu, trigger]);
+
   const playAgain = useCallback(() => {
     const gridData = createGridData(state.gridSize, state.gameMode, true);
     dispatch({ type: GAME_ACTIONS.SET_GRID_DATA, payload: gridData });
@@ -1188,7 +1204,7 @@ const GameScreen = ({ state, dispatch, isAdFree }) => {
           so it clears both the ad and the iOS home indicator. */}
       <View style={[styles.giveUpRow, { marginBottom: 70 + insets.bottom }]}>
         <TouchableOpacity
-          onPress={quitToMenu}
+          onPress={confirmGiveUp}
           style={styles.giveUpButton}
           accessibilityRole="button"
           accessibilityLabel="Give up and return to menu"
