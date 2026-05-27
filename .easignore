@@ -10,6 +10,13 @@ node_modules/
 ios/
 android/
 
+# --- Defensive: never upload local.properties at any depth. Contains
+#     this Mac's sdk.dir path, which makes EAS's Linux worker fail with
+#     "Directory does not exist" even though android/ should already
+#     cover it. Redundant patterns are cheap. ---
+local.properties
+**/local.properties
+
 # --- Expo / Metro caches ---
 .expo/
 
